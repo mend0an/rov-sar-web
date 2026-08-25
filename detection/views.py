@@ -110,8 +110,10 @@ def api_state(request):
         "mark_on_detect_enabled": state.mark_on_detect_enabled,
         "config": {
             "rtsp_label": _format_rtsp_label(settings.ROV_RTSP_URL),
+            "gps_port": state.gps_worker.port if state.gps_worker else settings.ROV_GPS_PORT,
             "gps_label": _format_gps_label(
-                settings.ROV_GPS_PORT, settings.ROV_GPS_BAUD,
+                state.gps_worker.port if state.gps_worker else settings.ROV_GPS_PORT,
+                settings.ROV_GPS_BAUD,
             ),
             "rov_label": f"{settings.ROV_HOST}:{settings.ROV_PORT}",
             "rov_enabled": settings.ROV_TELEMETRY_ENABLED,
@@ -130,7 +132,9 @@ def _format_rtsp_label(src: str) -> str:
 
 
 def _format_gps_label(port: str, baud: int) -> str:
-    if port.upper() == "DUMMY":
+    if not port or str(port).upper() == "AUTO":
+        return "AUTO (USB GPS)"
+    if str(port).upper() == "DUMMY":
         return "DUMMY (simulasi)"
     return f"{port} @ {baud}bps"
 
@@ -220,6 +224,39 @@ def api_waypoints_clear(request):
     state.clear_waypoints()
     broadcast("waypoints_cleared", {})
     return JsonResponse({"ok": True})
+
+
+# ─── GPS ─────────────────────────────────────────────────────────────────
+def api_gps_ports(request):
+    """Kembalikan daftar COM ports yang tersedia."""
+    try:
+        import serial.tools.list_ports as lp
+        ports = []
+        for p in lp.comports():
+            desc = p.description or p.device
+            ports.append({"port": p.device, "desc": desc})
+        return JsonResponse({"ok": True, "ports": ports})
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_set_gps_port(request):
+    """Set port GPS (misal COM4, AUTO, DUMMY)."""
+    try:
+        data = json.loads(request.body)
+        port = data.get("port")
+        if not port:
+            return JsonResponse({"ok": False, "error": "port required"}, status=400)
+        
+        if state.gps_worker is not None:
+            state.gps_worker.set_port(port)
+            return JsonResponse({"ok": True})
+        else:
+            return JsonResponse({"ok": False, "error": "gps worker not running"}, status=500)
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
 
 
 # ─── Kontrol & telemetri ROV ─────────────────────────────────────────────

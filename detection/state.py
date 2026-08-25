@@ -370,12 +370,12 @@ def broadcast(event: str, payload: dict):
       - control_updated     (dari control view)
       - gps_status          (dari GpsWorker on connect/disconnect/stale)
     """
-    from asgiref.sync import async_to_sync
-    from channels.layers import get_channel_layer
-    layer = get_channel_layer()
-    if layer is None:
-        return
     try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+        layer = get_channel_layer()
+        if layer is None:
+            return
         async_to_sync(layer.group_send)(
             "telemetry",
             {"type": "telemetry.event", "event": event, "payload": payload},

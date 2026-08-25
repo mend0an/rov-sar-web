@@ -6,9 +6,12 @@ Setiap update GPS valid:
 3. Cek auto-waypoint (jarak >= min_dist dari waypoint terakhir)
 
 Mode DUMMY: untuk testing tanpa hardware GPS.
+Mode AUTO: deteksi otomatis port USB GPS (misal BU-353N5 / Prolific / u-blox).
 
 Reliability:
     - Kalau serial gagal open, retry loop dengan backoff (bukan langsung mati)
+    - Auto-detection port GPS jika port di-set 'AUTO'
+    - Dukungan NMEA $GPRMC, $GNRMC, $GPGGA, $GNGGA, $GPGLL, $GNGLL
     - Kalau serial exception saat baca, log & continue (bukan crash thread)
     - Kalau tidak ada fix > STALE_TIMEOUT_S, invalidate gps_connected
       dan broadcast gps_status event supaya UI update
@@ -29,20 +32,60 @@ STALE_TIMEOUT_S     = 10.0    # detik tanpa fix → stale
 RECONNECT_BACKOFF_S = 3.0     # detik antar retry serial open
 
 
+def find_gps_port() -> tuple[str | None, str]:
+    """
+    Cari COM port yang terhubung ke modul GPS (misal BU-353N5 / Prolific / u-blox).
+    Mengembalikan (port_name, description).
+    """
+    try:
+        import serial.tools.list_ports as lp
+        ports = list(lp.comports())
+    except Exception:
+        return None, ""
+
+    if not ports:
+        return None, ""
+
+    # 1. Cari port dengan keyword USB GPS / Serial chipset umum
+    keywords = [
+        "prolific", "pl2303", "bu-353", "bu353", "gps", "u-blox", "ublox",
+        "silicon labs", "cp210", "ftdi", "ch340", "usb serial", "usb-to-serial"
+    ]
+    for p in ports:
+        desc = f"{p.description or ''} {p.hwid or ''}".lower()
+        if any(k in desc for k in keywords):
+            return p.device, p.description or p.device
+
+    # 2. Jika tidak ada keyword yang cocok tapi ada COM port tersedia, gunakan port pertama
+    return ports[0].device, ports[0].description or ports[0].device
+
+
 class GpsWorker(threading.Thread):
 
-    def __init__(self, port: str, baudrate: int = 9600,
+    def __init__(self, port: str = "AUTO", baudrate: int = 4800,
                  auto_wp_min_dist: float = 5.0):
         super().__init__(daemon=True, name="GpsWorker")
-        self.port = port
+        self.port = port if port is not None else "AUTO"
         self.baudrate = baudrate
         self.auto_wp_min_dist = auto_wp_min_dist
         self._stop_event = threading.Event()
+        self._active_port = None
+        self._active_baud = baudrate
+        self._ser = None
 
         # Watchdog thread untuk deteksi stale GPS
         self._watchdog = threading.Thread(
             target=self._run_watchdog, daemon=True, name="GpsWatchdog",
         )
+
+    def set_port(self, port: str):
+        """Ubah target port dan paksa reconnect jika sedang terhubung."""
+        self.port = port if port else "AUTO"
+        if self._ser is not None:
+            try:
+                self._ser.close()
+            except Exception:
+                pass
 
     def stop(self):
         self._stop_event.set()
@@ -50,7 +93,7 @@ class GpsWorker(threading.Thread):
     def run(self):
         self._watchdog.start()
 
-        if self.port.upper() == "DUMMY":
+        if str(self.port).upper() == "DUMMY":
             self._run_dummy()
         else:
             self._run_serial_with_reconnect()
@@ -87,7 +130,7 @@ class GpsWorker(threading.Thread):
 
     # ─── Real GPS with reconnect loop ─────────────────────────────────
     def _run_serial_with_reconnect(self):
-        """Loop reconnect: kalau serial fail, tunggu & coba lagi terus."""
+        """Loop reconnect: kalau serial fail, cari port & coba lagi terus."""
         try:
             import serial
         except ImportError:
@@ -96,16 +139,45 @@ class GpsWorker(threading.Thread):
 
         while not self._stop_event.is_set():
             ser = None
+            target_port = self.port
+            target_desc = ""
+
+            # Auto-detect jika port == 'AUTO'
+            if str(target_port).upper() == "AUTO":
+                detected_port, target_desc = find_gps_port()
+                if not detected_port:
+                    logger.warning("Menunggu perangkat USB GPS tersambung…")
+                    broadcast("gps_status", {
+                        "connected": False,
+                        "reason": "no_device_found",
+                    })
+                    for _ in range(int(RECONNECT_BACKOFF_S * 10)):
+                        if self._stop_event.is_set():
+                            return
+                        time.sleep(0.1)
+                    continue
+                target_port = detected_port
+
             try:
-                ser = serial.Serial(self.port, self.baudrate, timeout=1)
-                logger.info(f"✅ GPS terhubung: {self.port} @ {self.baudrate}bps")
-                broadcast("gps_status", {"connected": True, "port": self.port})
+                # BU-353N5 default 4800 bps
+                ser = serial.Serial(target_port, self.baudrate, timeout=1)
+                self._ser = ser
+                self._active_port = target_port
+                self._active_baud = self.baudrate
+                logger.info(f"✅ GPS terhubung: {target_port} @ {self.baudrate}bps ({target_desc or 'Serial'})")
+                
+                with state._gps_lock:
+                    state.gps_connected = True
+                
+                broadcast("gps_status", {
+                    "connected": True,
+                    "port": target_port,
+                    "baud": self.baudrate,
+                    "desc": target_desc,
+                })
                 self._read_serial_loop(ser)
             except serial.SerialException as e:
-                logger.warning(f"GPS serial error: {e} — retry dalam {RECONNECT_BACKOFF_S}s")
-                # Langsung set backend disconnected (thread-safe), jangan tunggu
-                # watchdog timeout — supaya /api/state tidak terlanjur bilang
-                # connected=True selama beberapa detik.
+                logger.warning(f"GPS serial error ({target_port}): {e} — retry dalam {RECONNECT_BACKOFF_S}s")
                 with state._gps_lock:
                     state.gps_connected = False
                 broadcast("gps_status", {
@@ -121,6 +193,7 @@ class GpsWorker(threading.Thread):
                         ser.close()
                     except Exception:
                         pass
+                self._ser = None
 
             # Backoff sebelum retry
             for _ in range(int(RECONNECT_BACKOFF_S * 10)):
@@ -146,15 +219,43 @@ class GpsWorker(threading.Thread):
             if not raw:
                 continue
 
-            if raw.startswith(("$GPRMC", "$GNRMC")):
+            # Parsing NMEA sentence
+            # 1. RMC (Recommended Minimum Navigation Information)
+            if raw.startswith(("$GPRMC", "$GNRMC", "$GLRMC", "$GARMC", "$BDRMC")):
                 parts = raw.split(",")
-                if len(parts) >= 9 and parts[2] == "A":
+                if len(parts) >= 9:
+                    status = parts[2]
+                    if status == "A":  # Active / Valid Fix
+                        try:
+                            lat = _nmea_to_dd(parts[3], parts[4])
+                            lon = _nmea_to_dd(parts[5], parts[6])
+                            cog = float(parts[8]) if parts[8] else last_heading
+                            last_heading = cog
+                            self._handle_fix(lat, lon, cog)
+                        except (ValueError, IndexError):
+                            pass
+
+            # 2. GGA (Global Positioning System Fix Data)
+            elif raw.startswith(("$GPGGA", "$GNGGA", "$GLGGA", "$GAGGA", "$BDGGA")):
+                parts = raw.split(",")
+                if len(parts) >= 7:
+                    fix_quality = parts[6]
+                    if fix_quality in ("1", "2", "4", "5"):  # 1=GPS, 2=DGPS, 4=RTK fix, 5=Float RTK
+                        try:
+                            lat = _nmea_to_dd(parts[2], parts[3])
+                            lon = _nmea_to_dd(parts[4], parts[5])
+                            self._handle_fix(lat, lon, last_heading)
+                        except (ValueError, IndexError):
+                            pass
+
+            # 3. GLL (Geographic Position - Latitude/Longitude)
+            elif raw.startswith(("$GPGLL", "$GNGLL")):
+                parts = raw.split(",")
+                if len(parts) >= 7 and parts[6] == "A":
                     try:
-                        lat = _nmea_to_dd(parts[3], parts[4])
-                        lon = _nmea_to_dd(parts[5], parts[6])
-                        cog = float(parts[8]) if parts[8] else last_heading
-                        last_heading = cog
-                        self._handle_fix(lat, lon, cog)
+                        lat = _nmea_to_dd(parts[1], parts[2])
+                        lon = _nmea_to_dd(parts[3], parts[4])
+                        self._handle_fix(lat, lon, last_heading)
                     except (ValueError, IndexError):
                         pass
 
@@ -198,10 +299,13 @@ def _nmea_to_dd(nmea_val: str, direction: str) -> float:
     """Konversi NMEA dddmm.mmmm → decimal degrees."""
     if not nmea_val:
         return 0.0
-    dot = nmea_val.index(".")
-    deg = float(nmea_val[:dot - 2])
-    mins = float(nmea_val[dot - 2:])
-    dd = deg + mins / 60.0
-    if direction in ("S", "W"):
-        dd = -dd
-    return dd
+    try:
+        dot = nmea_val.index(".")
+        deg = float(nmea_val[:dot - 2])
+        mins = float(nmea_val[dot - 2:])
+        dd = deg + mins / 60.0
+        if str(direction).upper() in ("S", "W"):
+            dd = -dd
+        return dd
+    except (ValueError, IndexError):
+        return 0.0

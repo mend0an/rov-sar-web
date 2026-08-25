@@ -82,8 +82,8 @@ ROV_MODEL_PATH = os.environ.get(
     "runs/detect/rov_small_yolo11s_720_datatrain_hopv2/weights/best.pt",
 )
 
-ROV_GPS_PORT = os.environ.get("ROV_GPS_PORT", "DUMMY")
-ROV_GPS_BAUD = int(os.environ.get("ROV_GPS_BAUD", "9600"))
+ROV_GPS_PORT = os.environ.get("ROV_GPS_PORT", "AUTO")
+ROV_GPS_BAUD = int(os.environ.get("ROV_GPS_BAUD", "4800"))
 
 # Default state untuk enhancement pipeline
 ROV_DEFAULT_HOP_DEPTH = int(os.environ.get("ROV_DEFAULT_HOP_DEPTH", "1"))

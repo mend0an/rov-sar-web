@@ -19,9 +19,10 @@ REM --- Index kamera / OBS Virtual Camera ------------------------------------
 set KAMERA_INDEX=0
 
 REM --- Port GPS -------------------------------------------------------------
-REM  Gunakan DUMMY untuk simulasi, atau COM7 dan seterusnya untuk perangkat.
-set GPS_PORT=DUMMY
-set GPS_BAUD=9600
+REM  Gunakan AUTO untuk deteksi otomatis USB GPS (BU-353N5 dll), DUMMY untuk simulasi,
+REM  atau COM4 dan seterusnya untuk port spesifik.
+set GPS_PORT=AUTO
+set GPS_BAUD=4800
 
 REM --- ROV ------------------------------------------------------------------
 set ROV_RTSP=rtsp://192.168.8.9:8554/stream

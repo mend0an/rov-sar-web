@@ -27,4 +27,7 @@ urlpatterns = [
     path("api/rov/prefs",        views.api_rov_prefs),
     path("api/sources",          views.api_sources),
     path("api/source",           views.api_set_source),
+    
+    path("api/gps/ports",        views.api_gps_ports),
+    path("api/gps/port",         views.api_set_gps_port),
 ]

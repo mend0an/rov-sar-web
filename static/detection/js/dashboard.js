@@ -136,6 +136,8 @@ function addOfflineGridOverlay() {
     offlineLabel.addTo(map);
 }
 
+let hasAutoCentered = false;
+
 function updateRovMarker(lat, lon, heading) {
     lastGpsPos = [lat, lon];
     if (!map) return;   // Leaflet tidak load — skip
@@ -157,6 +159,11 @@ function updateRovMarker(lat, lon, heading) {
         rovMarker = L.marker([lat, lon], { icon: rovIcon }).addTo(map);
     } else {
         rovMarker.setLatLng([lat, lon]);
+    }
+
+    if (!hasAutoCentered) {
+        map.setView([lat, lon], 17);
+        hasAutoCentered = true;
     }
 
     trailPoints.push([lat, lon]);
@@ -299,7 +306,11 @@ function handleTelemetryEvent(data) {
                 setStatus(`❌ GPS serial error — reconnecting…`);
             }
         } else {
-            updateGpsStatus(true);
+            const label = data.payload.port ? `${data.payload.port} @ ${data.payload.baud}bps` : undefined;
+            updateGpsStatus(true, label);
+            if (label) {
+                setStatus(`✅ GPS Terhubung ke ${label}`);
+            }
         }
     }
 }
@@ -488,6 +499,66 @@ let cameraSources = [];
 
 const REFRESH_VALUE = '__refresh__';
 
+let gpsPorts = [];
+
+async function loadGpsPorts() {
+    const sel = $('gps-port-select');
+    if (!sel) return;
+    
+    sel.innerHTML = '<option value="">memuat…</option>';
+    sel.disabled = true;
+
+    try {
+        const r = await fetch('/api/gps/ports');
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || 'gagal');
+        gpsPorts = j.ports || [];
+    } catch (e) {
+        sel.innerHTML = `<option value="">(gagal memuat port)</option>`;
+        sel.disabled = false;
+        return;
+    }
+
+    sel.innerHTML = '';
+    
+    // Opsi AUTO
+    const optAuto = document.createElement('option');
+    optAuto.value = 'AUTO';
+    optAuto.textContent = 'AUTO (Deteksi Otomatis)';
+    sel.appendChild(optAuto);
+    
+    // Opsi DUMMY
+    const optDummy = document.createElement('option');
+    optDummy.value = 'DUMMY';
+    optDummy.textContent = 'DUMMY (Simulasi)';
+    sel.appendChild(optDummy);
+
+    gpsPorts.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.port;
+        opt.textContent = `${p.port} - ${p.desc}`;
+        sel.appendChild(opt);
+    });
+
+    sel.disabled = false;
+}
+
+async function changeGpsPort(port) {
+    const sel = $('gps-port-select');
+    sel.disabled = true;
+    setStatus(`↻ Mengganti port GPS ke ${port}…`);
+    try {
+        const j = await postJSON('/api/gps/port', { port: port });
+        if (!j || !j.ok) {
+            setStatus('❌ ' + ((j && j.error) || 'gagal ganti port GPS'));
+        } else {
+            setStatus(`✅ Port GPS diubah ke ${port}`);
+        }
+    } finally {
+        sel.disabled = false;
+    }
+}
+
 async function loadCameraSources(refresh) {
     const sel = $('camera-select');
     if (refresh) {
@@ -592,17 +663,30 @@ function updatePerfLine(cap) {
     }
 }
 
-function updateGpsStatus(connected, sourceLabel) {
+function updateGpsStatus(connected, sourceLabel, text) {
     const el = $('gps-conn-status');
+    const defaultText = connected ? 'GPS aktif' : 'Menunggu fix';
+    el.textContent = '● ' + (text || defaultText);
     if (connected) {
-        el.textContent = '● GPS aktif';
         el.className = 'status-line active';
     } else {
-        el.textContent = '● Menunggu fix';
         el.className = 'status-line inactive';
     }
     if (sourceLabel !== undefined) {
-        $('gps-source').textContent = sourceLabel;
+        const sel = $('gps-port-select');
+        if (sel) {
+            // Coba set value dari select box jika ada opsi yang cocok
+            let optionExists = false;
+            for (let i = 0; i < sel.options.length; i++) {
+                if (sel.options[i].value === sourceLabel) {
+                    optionExists = true;
+                    break;
+                }
+            }
+            if (optionExists) {
+                sel.value = sourceLabel;
+            }
+        }
     }
 }
 
@@ -618,8 +702,15 @@ async function refreshStatus() {
         updateCaptureStatus(streaming);
         updatePerfLine(s.capture);
         // GPS sehat kalau update terakhir < 10 detik
-        const gpsActive = s.gps.connected && (Date.now()/1000 - s.gps.last_update) < 10;
-        updateGpsStatus(gpsActive);
+        const hasRecentFix = (Date.now()/1000 - s.gps.last_update) < 10;
+        
+        let gpsStateText;
+        if (s.gps.connected) {
+            gpsStateText = hasRecentFix ? 'GPS aktif' : 'Menunggu Fix Satelit';
+            updateGpsStatus(hasRecentFix, undefined, gpsStateText);
+        } else {
+            updateGpsStatus(false, undefined, 'Terputus');
+        }
         // ROV: heartbeat menangkap kasus telemetri berhenti tanpa event
         // rov_status (misal worker mati), yang tidak akan terdeteksi kalau
         // hanya mengandalkan broadcast.
@@ -703,6 +794,15 @@ function bindControls() {
         }
         changeCameraSource(parseInt(e.target.value, 10));
     });
+
+    // ── Pilih port GPS
+    const gpsPortSelect = $('gps-port-select');
+    if (gpsPortSelect) {
+        gpsPortSelect.addEventListener('change', (e) => {
+            if (e.target.value === '') return;
+            changeGpsPort(e.target.value);
+        });
+    }
 
     // ── Preferensi ROV (bukan perintah ke wahana, tidak perlu unlock)
     $('ctrl-rov-heading').addEventListener('change', (e) => {
@@ -818,8 +918,9 @@ async function fetchInitialState() {
         updateCaptureStatus(streaming0);
         updatePerfLine(s.capture);
         await loadCameraSources();
+        await loadGpsPorts();
         const gpsActive = s.gps.connected && (Date.now()/1000 - s.gps.last_update) < 10;
-        updateGpsStatus(gpsActive, s.config.gps_label);
+        updateGpsStatus(gpsActive, s.config.gps_port);
 
         // Populate existing waypoints (history)
         s.waypoints.forEach(wp => {

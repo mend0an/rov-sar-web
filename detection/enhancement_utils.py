@@ -9,7 +9,6 @@ copy `enhancement_utils_v2.py` lalu ganti import di `capture.py`.
 """
 import cv2
 import numpy as np
-import torch
 
 
 def calculate_hop_coefficients():
@@ -35,24 +34,39 @@ def calculate_hop_coefficients():
 
 def apply_hop_enhancement(frame, depth, rx, gx, bx):
     """Penerapan HOP enhancement (formula I_p = I_k * K(k))."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    frame_tensor = torch.from_numpy(frame).float().to(device)
-    poly = torch.tensor([depth**i for i in range(7)], dtype=torch.float32, device=device)
+    try:
+        import torch
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        frame_tensor = torch.from_numpy(frame).float().to(device)
+        poly = torch.tensor([depth**i for i in range(7)], dtype=torch.float32, device=device)
 
-    rx_t = torch.tensor(rx, dtype=torch.float32, device=device)
-    gx_t = torch.tensor(gx, dtype=torch.float32, device=device)
-    bx_t = torch.tensor(bx, dtype=torch.float32, device=device)
+        rx_t = torch.tensor(rx, dtype=torch.float32, device=device)
+        gx_t = torch.tensor(gx, dtype=torch.float32, device=device)
+        bx_t = torch.tensor(bx, dtype=torch.float32, device=device)
 
-    r_corr = frame_tensor[:, :, 2] * torch.dot(poly, rx_t)
-    g_corr = frame_tensor[:, :, 1] * torch.dot(poly, gx_t)
-    b_corr = frame_tensor[:, :, 0] * torch.dot(poly, bx_t)
+        r_corr = frame_tensor[:, :, 2] * torch.dot(poly, rx_t)
+        g_corr = frame_tensor[:, :, 1] * torch.dot(poly, gx_t)
+        b_corr = frame_tensor[:, :, 0] * torch.dot(poly, bx_t)
 
-    enhanced = torch.stack([
-        b_corr.clamp(0, 255),
-        g_corr.clamp(0, 255),
-        r_corr.clamp(0, 255),
-    ], dim=2).to(torch.uint8).cpu().numpy()
-    return enhanced
+        enhanced = torch.stack([
+            b_corr.clamp(0, 255),
+            g_corr.clamp(0, 255),
+            r_corr.clamp(0, 255),
+        ], dim=2).to(torch.uint8).cpu().numpy()
+        return enhanced
+    except Exception:
+        # Fallback CPU NumPy jika torch tidak tersedia atau DLL diblokir oleh OS
+        poly = np.array([depth**i for i in range(7)], dtype=np.float32)
+        r_scale = float(np.dot(poly, rx))
+        g_scale = float(np.dot(poly, gx))
+        b_scale = float(np.dot(poly, bx))
+
+        frame_f = frame.astype(np.float32)
+        b_corr = np.clip(frame_f[:, :, 0] * b_scale, 0, 255)
+        g_corr = np.clip(frame_f[:, :, 1] * g_scale, 0, 255)
+        r_corr = np.clip(frame_f[:, :, 2] * r_scale, 0, 255)
+
+        return np.stack([b_corr, g_corr, r_corr], axis=2).astype(np.uint8)
 
 
 def apply_clahe(frame):
