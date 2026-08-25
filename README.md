@@ -5,71 +5,58 @@ detection untuk search-and-rescue). Backend (Python/Django) jalan di laptop
 yang terhubung ke router ROV; UI (HTML/CSS/JS) diakses lewat browser dari
 device manapun di jaringan yang sama.
 
-**Status: paritas dengan `yolo_hop_v10_gps.py`.** Versi ini menutup dua
-blocker dari v.beta3.1: jalur RTSP dipindah dari OpenCV ke PyAV (OpenCV tidak
-bisa mendekode stream ROV Titan T1), dan telemetri ROV lewat TCP 6666 masuk
-lengkap dengan panel UI-nya. Lihat CHANGELOG.md dan TEST_RESULTS.md.
+**Status: beta8.1f.** Jalur RTSP menggunakan PyAV/UDP, telemetri ROV masuk
+melalui TCP 6666, dan kendali web mendukung joystick virtual, keyboard,
+controller Gamepad API, serta pemetaan kustom per perangkat.
 
-Semua lolos test logic/plumbing/integrasi, termasuk uji terhadap ROV tiruan
-yang bicara protokol TCP asli. **Validasi terhadap ROV sungguhan adalah
-langkah lapangan berikutnya** — yang belum pernah diuji di sini adalah stream
-RTSP dan socket telemetri dari perangkat keras yang nyata.
+RTSP dan kendali gerak sudah dicoba pada ROV nyata. Uji regresi software dapat
+dijalankan tanpa hardware; uji kolam menyeluruh dan validasi operasi berdurasi
+panjang tetap harus dilakukan sebelum pemakaian lapangan.
 
 ---
 
 ## Arsitektur
 
 ```
-                     Laptop (ini)
-   ┌──────────────────────────────────────────────────┐
-   │                                                   │
-   │   ┌─── Capture Thread (background) ─────────┐    │
-ROV│──►│  • RTSPReader (PyAV, UDP) via rov_camera  │   │
-   │   │  • HOP / CLAHE / DCP / WB enhancement      │   │
-   │   │  • YOLO v11 inference                       │   │
-   │   │  • Update shared frame buffer              │   │
-   │   └──────────────────────────────────────────┘    │
-   │                                                    │
-   │   ┌─── GPS Thread (background) ────────────┐     │
-GPS│──►│  • Read NMEA via pyserial                  │   │
-   │   │  • Parse $GPRMC / $GNRMC                   │   │
-   │   │  • Push update via Channels group           │   │
-   │   └──────────────────────────────────────────┘    │
-   │                                                    │
-   │   ┌─── ROV Thread (TCP 6666) ─────────────┐      │
-ROV│◄─►│  • Telemetri R/P/Y/D, suhu, baterai       │    │
-   │   │  • Yaw → heading peta, D → depth HOP       │    │
-   │   │  • Perintah light / holdd / holdy           │    │
-   │   └──────────────────────────────────────────┘    │
-   │                                                    │
-   │   ┌─── Django + Channels (ASGI) ──────────┐      │
-   │   │  HTTP:                                   │     │
-   │   │   GET  /              dashboard page    │     │
-   │   │   GET  /video         MJPEG stream      │     │
-   │   │   GET  /api/state     full snapshot     │     │
-   │   │   POST /api/control   toggle HOP/YOLO   │     │
-   │   │   POST /api/waypoint  manual mark        │     │
-   │   │   GET  /api/waypoints list waypoints     │     │
-   │   │   POST /api/waypoints/clear              │     │
-   │   │   GET  /api/screenshot download JPG     │     │
-   │   │   GET  /api/export    GPX download      │     │
-   │   │   POST /api/rov/unlock   buka kunci      │     │
-   │   │   POST /api/rov/command  light/hold      │     │
-   │   │   POST /api/rov/prefs    heading/depth   │     │
-   │   │   GET  /api/sources      daftar kamera   │     │
-   │   │  WebSocket:                              │     │
-   │   │   ws://.../ws/telemetry  GPS push       │     │
-   │   └─────────────────────────────────────────┘     │
-   └───────────────────────────────────────────────────┘
-                          ▲
-                          │ HTTP + WebSocket (port 8000)
-                          │ via WiFi/LAN
-                  ┌───────┴────────────┐
-                  │  Browser Client    │  (laptop, tablet, HP)
-                  │  HTML+CSS+JS       │
-                  │  + Leaflet.js map  │
-                  └────────────────────┘
+ROV camera ──RTSP/PyAV──► CaptureWorker ──► HOP/YOLO ──► MJPEG /video
+                                      └──► shared state ──► /api/state
+
+ROV Titan T1 ◄──TCP 6666──► RovWorker
+              telemetri       ├──► shared state + WebSocket
+              kontrol         ├──► thro/lift/yaw heartbeat
+                              └──► deadman server + force-stop
+
+GPS/serial ──NMEA──► GpsWorker ──► shared state + WebSocket
+
+Browser ──HTTP/JSON──► Django views
+        ──WebSocket──► Channels telemetry
 ```
+
+### Endpoint utama
+
+| Metode | Endpoint | Fungsi |
+|---|---|---|
+| `GET` | `/` | Dashboard |
+| `GET` | `/video` | Stream MJPEG |
+| `GET` | `/api/state` | Snapshot status aplikasi, capture, GPS, dan ROV |
+| `POST` | `/api/control` | Pengaturan HOP, YOLO, dan capture |
+| `GET/POST` | `/api/waypoints`, `/api/waypoint` | Daftar dan penandaan waypoint |
+| `POST` | `/api/waypoints/clear` | Menghapus waypoint |
+| `GET` | `/api/screenshot`, `/api/export` | Unduh gambar dan GPX |
+| `POST` | `/api/rov/unlock` | Buka/kunci kendali ROV |
+| `POST` | `/api/rov/command` | Perintah non-gerak seperti lampu dan lock |
+| `POST` | `/api/rov/move` | Vektor gerak `thro/lift/yaw`; heartbeat 10 Hz |
+| `POST` | `/api/rov/estop` | STOP keselamatan, tidak memerlukan unlock |
+| `GET` | `/api/rov/caps` | Daftar kemampuan/perintah yang tersedia |
+| `POST` | `/api/rov/sim` | Aktif/nonaktif mode simulasi |
+| `GET/POST/DELETE` | `/api/rov/mapping` | Profil pemetaan controller |
+| `POST` | `/api/rov/prefs` | Preferensi heading dan depth |
+| `GET/POST` | `/api/sources`, `/api/source` | Daftar dan ganti sumber kamera |
+| WebSocket | `/ws/telemetry` | Push status GPS, ROV, dan aplikasi |
+
+Sumbu gerak sengaja ditolak oleh `/api/rov/command`. Semua gerakan harus
+melalui `/api/rov/move` agar pilot lock, pencatatan heartbeat, dan deadman
+server tetap berlaku.
 
 ---
 
@@ -90,7 +77,9 @@ dengan CUDA support yang sama seperti project lama-mu. Kalau sudah ada
 environment Python lama yang work, sebaiknya pakai itu saja, tinggal tambah:
 
 ```bash
-pip install Django==5.0.* channels==4.* pyserial
+pip install "Django>=5.0,<5.2" channels daphne pyserial av
+# Windows, bila membutuhkan enumerasi kamera DirectShow:
+pip install pygrabber
 ```
 
 ### 2. Konfigurasi
@@ -159,63 +148,88 @@ http://192.168.8.100:8000/
 
 ## Testing
 
-Test scripts ada di `tests/`. Bisa dijalankan tanpa hardware ROV:
+Semua unit dan regression test dapat dijalankan dengan:
 
 ```bash
-# Async MJPEG + broadcast (butuh server jalan di mode fake worker)
-ROV_FAKE_WORKERS=1 daphne -b 127.0.0.1 -p 8768 rov_sar_web.asgi:application &
-python3 tests/test_mjpeg_client.py http://127.0.0.1:8768/video 4
-python3 tests/test_ws_broadcast.py http://127.0.0.1:8768
-
-# Unit & integration tests (tanpa server, tanpa hardware)
-python3 tests/test_debounce.py
-python3 tests/test_gps.py
-python3 tests/test_beta31_patches.py
-python3 tests/test_rov_telemetry.py   # ROV tiruan bicara protokol TCP asli
-python3 tests/test_rov_api.py         # gerbang unlock + token
-python3 tests/test_capture_rov.py     # routing PyAV, dedup, clamp depth
-python3 tests/test_source_switch.py   # ganti sumber runtime, pacing, stats
+python -m unittest discover -s tests -p "test_*.py"
 ```
 
-`ROV_FAKE_WORKERS=1` menjalankan fake frame + GPS injector untuk test tanpa
-hardware ROV/GPS/RTSP dan tanpa torch/YOLO. Fake frame tetap di-generate pakai
-`cv2.imencode()` (OpenCV memang dependency aplikasi) supaya JPEG-nya valid dan
-bisa di-decode. Untuk operasi nyata, jangan set variable ini.
+Kelompok pengujian yang tersedia:
 
-Hasil test terakhir: lihat TEST_RESULTS.md.
+- `test_beta81_controller.py` — controller, pilot lock, deadman, simulasi,
+  mapping, dan interlock.
+- `test_beta81c_atomic_stop.py` — STOP atomik dan race MOVE/STOP.
+- `test_beta81d_hold_heartbeat.py` — pengiriman gerak 10 Hz, pelepasan
+  joystick, indikator TX, dan layout mobile.
+- `test_rov_api.py`, `test_rov_telemetry.py`, `test_capture_rov.py` — API ROV,
+  protokol TCP, RTSP/PyAV, dan capture.
+- `test_controls.py`, `test_source_switch.py`, `test_batch_env.py` — kontrol
+  UI, pergantian sumber, dan launcher Windows.
+- `test_gps.py`, `test_debounce.py`, `test_harness.py` — GPS, debounce, dan
+  test harness.
+
+Dua pengujian berikut membutuhkan server yang sedang berjalan:
+
+```bash
+# Terminal 1 (Windows CMD)
+set ROV_FAKE_WORKERS=1
+python manage.py runserver 127.0.0.1:8768 --noreload
+
+# Terminal 2
+python tests/test_mjpeg_client.py http://127.0.0.1:8768/video 4
+python tests/test_ws_broadcast.py http://127.0.0.1:8768
+```
+
+`ROV_FAKE_WORKERS=1` menjalankan frame, GPS, dan telemetri tiruan tanpa
+hardware ROV/RTSP dan tanpa model YOLO. Hasil pengujian terakhir dicatat di
+`TEST_RESULTS.md`.
 
 ## Struktur File
 
 ```
 rov_sar_web/
 ├── manage.py
+├── jalan.bat                    ← launcher Windows
+├── config.example.bat           ← contoh konfigurasi lokal
 ├── requirements.txt
 ├── README.md
-├── rov_sar_web/              ← Django project config
+├── UPDATE_beta8.1c.md
+├── UPDATE_beta8.1f.md
+├── rov_sar_web/
 │   ├── settings.py
 │   ├── urls.py
-│   ├── asgi.py               ← ASGI (untuk WebSocket)
+│   ├── asgi.py
 │   └── wsgi.py
-├── detection/                ← Django app utama
-│   ├── apps.py               ← Start background workers di sini
-│   ├── views.py              ← HTTP endpoints (MJPEG, REST)
-│   ├── consumers.py          ← WebSocket consumer
-│   ├── routing.py            ← WS URL routing
-│   ├── urls.py               ← HTTP URL routing
-│   ├── state.py              ← Shared state singleton
-│   ├── capture.py            ← video + enhancement + YOLO worker
-│   ├── gps_worker.py         ← GPS NMEA worker
-│   ├── rov_camera.py         ← RTSPReader (PyAV) — port dari project desktop
-│   ├── rov_telemetry.py      ← klien TCP 6666 — port dari project desktop
-│   ├── rov_worker.py         ← jembatan telemetri → state → WebSocket
-│   └── enhancement_utils.py  ← copy dari project lama (tidak diubah)
+├── detection/
+│   ├── apps.py                  ← lifecycle background workers
+│   ├── views.py                 ← HTTP/MJPEG/REST endpoints
+│   ├── consumers.py             ← WebSocket consumer
+│   ├── routing.py
+│   ├── urls.py
+│   ├── state.py                 ← shared state, pilot lock, move heartbeat
+│   ├── capture.py               ← video, enhancement, dan YOLO
+│   ├── gps_worker.py
+│   ├── rov_camera.py            ← RTSPReader PyAV
+│   ├── rov_telemetry.py         ← klien protokol TCP 6666
+│   ├── rov_worker.py            ← telemetri, gerak, deadman, force-stop
+│   ├── rov_caps.py              ← capability gate perintah ROV
+│   ├── controller_profiles.py   ← profil mapping controller
+│   └── enhancement_utils.py
 ├── templates/detection/
-│   └── dashboard.html        ← UI meniru PyQt5
-└── static/detection/
-    ├── css/dashboard.css
-    ├── js/dashboard.js
-    └── img/
-        └── ROV_BANNER.jpg    ← TARUH BANNER DI SINI (copy dari project lama)
+│   └── dashboard.html
+├── static/detection/
+│   ├── css/
+│   │   ├── dashboard.css
+│   │   └── controls.css
+│   ├── js/
+│   │   ├── dashboard.js
+│   │   └── controls.js          ← joystick, keyboard, gamepad, heartbeat
+│   └── vendor/leaflet/
+└── tests/
+    ├── test_beta81_controller.py
+    ├── test_beta81c_atomic_stop.py
+    ├── test_beta81d_hold_heartbeat.py
+    └── test_*.py
 ```
 
 **Banner image:** copy `ROV_BANNER.jpg` dari project lama ke
@@ -242,12 +256,13 @@ Beberapa elemen disesuaikan karena perbedaan arsitektur web vs desktop:
 
 | PyQt5 Original | Web Version |
 |---|---|
-| Dropdown kamera (DirectShow) | Read-only label (source di-set via env var) |
-| Tombol "Mulai/Hentikan Kamera" | Auto-start, indikator `● Streaming aktif` |
-| Dropdown port GPS | Read-only label |
-| Tombol "Hubungkan/Putus GPS" | Auto-start, indikator `● GPS aktif` |
+| Dropdown kamera (DirectShow) | Daftar sumber dan pergantian kamera dari UI tanpa restart |
+| Tombol "Mulai/Hentikan Kamera" | Auto-start dan indikator status streaming |
+| Controller desktop | Joystick virtual, keyboard, Gamepad API, dan mapping kustom |
+| Dropdown port GPS | Port diatur lewat konfigurasi; status tampil di UI |
+| Tombol "Hubungkan/Putus GPS" | Auto-start dan indikator status GPS |
 | Map render QPainter | Leaflet.js dengan tile OpenStreetMap |
-| Zoom buttons di map | Sama (zoom in/out + center ke ROV) |
+| Zoom buttons di map | Zoom in/out dan center ke ROV |
 
 ---
 
@@ -266,39 +281,53 @@ Beberapa elemen disesuaikan karena perbedaan arsitektur web vs desktop:
 
 4. **GPS dummy mode.** Set `ROV_GPS_PORT=DUMMY` untuk test tanpa hardware.
 
-5. **Tidak ada auth.** Untuk LAN tertutup OK; kalau mau dibuka ke internet,
-   tambah Django auth atau reverse proxy dengan basic auth.
+5. **Tidak ada login pengguna.** Gunakan hanya pada LAN ROV tertutup. Dukungan
+   token backend belum terhubung ke input dashboard pada beta8.1f; lihat bagian
+   keamanan kendali di bawah.
 
 ---
 
 ## Keamanan kontrol ROV — BACA SEBELUM DIPAKAI DI LAPANGAN
 
-Ini perbedaan mendasar antara versi web dan versi desktop.
+Dashboard melayani seluruh LAN. Siapa pun yang dapat membuka halaman berpotensi
+mengirim perintah, sehingga kendali harus tetap terkunci sampai operator siap.
 
-Di PyQt5, kontrol ROV aman karena satu-satunya cara menyentuhnya adalah duduk
-di depan laptop. Dashboard ini melayani seluruh LAN. Artinya **siapa pun yang
-tersambung ke WiFi ROV bisa mengirim POST dan menggerakkan wahana** — termasuk
-orang yang tidak sengaja membuka halaman dari HP-nya.
+### Jalur gerak yang berlaku pada beta8.1f
 
-Dua lapis penjagaan:
+Gerakan **tersedia melalui HTTP** pada `POST /api/rov/move`. Browser mengirim
+satu vektor `thro/lift/yaw` setiap 100 ms atau 10 Hz. Endpoint
+`/api/rov/command` tidak menerima sumbu gerak; pemisahan ini memastikan semua
+gerakan melewati pengaman yang sama.
 
-1. **Unlock adalah state SERVER.** Checkbox "Buka Kunci Kontrol ROV" tidak
-   menonaktifkan tombol secara kosmetik — dia mengubah flag di server, dan
-   perintah ditolak dengan HTTP 409 selama flag itu False. Klien tidak bisa
-   melewatinya dengan mengirim request langsung.
+Pengamannya:
 
-2. **Token.** Set `ROV_CONTROL_TOKEN` ke string acak, lalu setiap perintah
-   harus membawa header `X-ROV-Token`. Kosong = tanpa token, cukup untuk uji
-   kolam tertutup, **jangan untuk lapangan terbuka**.
+1. **Server unlock.** MOVE ditolak dengan HTTP 409 selama kendali terkunci.
+2. **Pilot lock.** Klien pertama yang mengirim MOVE menjadi pilot sementara,
+   sehingga dua browser tidak dapat mengendalikan ROV bersamaan.
+3. **Heartbeat gerak 10 Hz.** Sumbu aktif dikirim ulang selama stick ditahan.
+   Saat dilepas, nilai nol dikirim berulang untuk mengurangi risiko paket STOP
+   tunggal hilang.
+4. **Deadman server 1,5 detik.** Jika vektor terakhir masih aktif tetapi
+   heartbeat browser berhenti, `RovWorker` menjalankan `force_stop()`.
+   Pemeriksaan dilakukan sekitar setiap 200 ms.
+5. **E-STOP.** `POST /api/rov/estop` menolkan semua sumbu dan tidak
+   memerlukan unlock. STOP tetap dikirim ke wahana meskipun mode simulasi
+   sedang aktif.
+6. **Deadman klien.** Tab tersembunyi, halaman ditutup, dan beberapa kondisi
+   kehilangan fokus memicu penolakan input atau E-STOP dari browser.
 
-### Perintah gerak tidak tersedia lewat HTTP — ini disengaja
+Indikator `TX … Hz` pada panel kendali menunjukkan ACK nyata dari
+`/api/rov/move`. Saat stick aktif, nilai normalnya mendekati 10 Hz. Jika
+menjadi `TX macet` atau `TX gagal`, lepaskan stick dan tekan STOP.
 
-`lift` / `thro` / `yaw` **tidak** diekspos. Kendali gerak butuh laju tinggi dan
-dead-man switch: kalau browser mati atau WiFi putus di tengah gerakan, ROV akan
-menahan perintah terakhir dan terus bergerak. Request/response HTTP bukan
-transport yang tepat untuk itu — perlu WebSocket dengan heartbeat dan auto-stop.
-Yang diizinkan hanya `light`, `holdd`, `holdy`; ketiganya idempoten dan aman
-kalau koneksi putus.
+### Token kendali
+
+Backend mendukung `ROV_CONTROL_TOKEN` melalui header `X-ROV-Token`.
+Namun dashboard beta8.1f **belum mempunyai input token dan belum menyertakan
+header tersebut pada request kendali**. Jika token diaktifkan sekarang,
+perintah dari dashboard akan ditolak HTTP 403. Sampai dukungan token pada UI
+ditambahkan, gunakan jaringan ROV yang tertutup, jangan expose port 8000 ke
+internet, dan biarkan kontrol terkunci ketika tidak digunakan.
 
 ---
 
