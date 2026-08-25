@@ -1,0 +1,397 @@
+/*
+ * Dashboard CSS — meniru tampilan PyQt5 desktop application.
+ *
+ * Palette diambil dari styling di ui_main_window_gps.py:
+ *   • Map background        : #1c2e45  (dark navy)
+ *   • Map title background  : #dbe5f0  (light blue tint)
+ *   • Border                : #888 / #aaa / #c0c0c0
+ *   • Coordinate text       : #003d80  (dark blue)
+ *   • Video background      : #333     (dark gray)
+ *   • Video border          : 2px solid black
+ *   • Window background     : #f0f0f0  (default Qt light gray)
+ *
+ * Font: Segoe UI untuk umum, Courier New untuk koordinat/mono.
+ */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+    height: 100%;
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    background: #f0f0f0;
+    color: #222;
+    font-size: 13px;
+}
+
+/* ═══ Banner ═══════════════════════════════════════════════════════ */
+.banner {
+    width: 100%;
+    background: #f0f0f0;
+    text-align: center;
+    line-height: 0;            /* hilangkan gap di bawah <img> */
+}
+.banner img {
+    max-width: 100%;
+    height: auto;
+    display: inline-block;
+}
+
+/* ═══ Main 3-column layout ═══════════════════════════════════════ */
+.main-layout {
+    display: grid;
+    grid-template-columns: 1fr 280px 400px;
+    gap: 8px;
+    padding: 8px;
+    align-items: start;
+}
+
+/* Responsive: stack di layar sempit */
+@media (max-width: 1100px) {
+    .main-layout {
+        grid-template-columns: 1fr;
+    }
+    .controls-panel, .gps-panel {
+        width: 100%;
+    }
+}
+
+/* ═══ LEFT: Video panel ══════════════════════════════════════════ */
+.video-panel {
+    border: 2px solid black;
+    background: #333;
+    min-height: 480px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+.video-panel img {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+    background: #333;
+}
+
+/* ═══ MIDDLE: Controls panel ═══════════════════════════════════ */
+.controls-panel {
+    background: #f5f5f5;
+    border: 1px solid #c0c0c0;
+    padding: 8px 10px;
+    min-height: 480px;
+}
+
+.ctl-label {
+    display: block;
+    font-size: 13px;
+    color: #222;
+    margin: 6px 0 3px;
+}
+
+.ctl-readonly {
+    background: white;
+    border: 1px solid #aaa;
+    padding: 4px 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: #003d80;
+    border-radius: 2px;
+    word-break: break-all;
+}
+
+.status-line {
+    font-size: 11px;
+    padding: 3px 0 6px;
+    color: #999;
+    font-family: 'Courier New', monospace;
+}
+.status-line.active   { color: #1f7a1f; }
+.status-line.inactive { color: #999;    }
+.status-line.error    { color: #b03030; }
+
+input[type="range"] {
+    width: 100%;
+    margin: 4px 0 8px;
+}
+
+.cb-label {
+    display: block;
+    cursor: pointer;
+    margin: 3px 0;
+    font-size: 13px;
+    user-select: none;
+}
+.cb-label input[type="checkbox"] {
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+button {
+    width: 100%;
+    padding: 5px 8px;
+    margin: 3px 0;
+    border: 1px solid #888;
+    border-radius: 2px;
+    background: linear-gradient(to bottom, #fafafa 0%, #e8e8e8 100%);
+    color: #222;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    text-align: center;
+}
+button:hover {
+    background: linear-gradient(to bottom, #ffffff 0%, #d8d8d8 100%);
+    border-color: #555;
+}
+button:active {
+    background: linear-gradient(to bottom, #d0d0d0 0%, #c0c0c0 100%);
+}
+
+.separator {
+    border: none;
+    border-top: 1px solid #b0b0b0;
+    border-bottom: 1px solid white;   /* Qt sunken effect */
+    margin: 10px 0;
+}
+
+.section-header {
+    font-weight: bold;
+    font-size: 13px;
+    text-align: center;
+    color: #444;
+    margin: 4px 0 6px;
+}
+
+/* ═══ RIGHT: GPS Panel ═══════════════════════════════════════════ */
+.gps-panel {
+    background: #f0f0f0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.map-title {
+    background: #dbe5f0;
+    border: 1px solid #888;
+    padding: 4px 6px;
+    font-weight: bold;
+    font-size: 13px;
+    text-align: center;
+    color: #222;
+}
+
+/* Map (Leaflet container) */
+#map {
+    border: 1px solid #888;
+    background: #1c2e45;
+    height: 390px;
+    width: 100%;
+}
+
+/* Saat peta disembunyikan */
+.gps-panel.map-hidden #map { display: none; }
+
+/* Coordinate frame */
+.coord-frame {
+    background: white;
+    border: 1px solid #aaa;
+    padding: 4px 6px;
+}
+.coord-row {
+    display: grid;
+    grid-template-columns: 78px 1fr 78px 1fr;
+    gap: 6px;
+    align-items: center;
+    padding: 2px 0;
+}
+.coord-key {
+    font-size: 12px;
+    color: #444;
+}
+.coord-val {
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    color: #003d80;
+    font-size: 12px;
+}
+
+/* Waypoint table */
+.wp-table-label {
+    font-weight: bold;
+    font-size: 13px;
+    margin: 4px 0 2px;
+    color: #222;
+}
+.wp-table-wrap {
+    background: white;
+    border: 1px solid #aaa;
+    max-height: 160px;
+    overflow-y: auto;
+}
+#wp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+#wp-table thead th {
+    position: sticky;
+    top: 0;
+    background: #e8e8e8;
+    border-bottom: 1px solid #aaa;
+    padding: 4px 6px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: bold;
+    color: #444;
+}
+#wp-table th.col-dot { width: 24px; text-align: center; }
+#wp-table tbody td {
+    padding: 3px 6px;
+    border-bottom: 1px solid #eee;
+}
+#wp-table tbody tr:nth-child(even) {
+    background: #f9f9f9;
+}
+#wp-table tbody td.col-dot {
+    text-align: center;
+    font-weight: bold;
+}
+.dot-normal { color: #44cc77; }
+.dot-detect { color: #ff6600; }
+
+/* Map button row */
+.map-btn-row {
+    display: flex;
+    gap: 4px;
+}
+.map-btn-row button {
+    flex: 1;
+    height: 26px;
+    margin: 0;
+    font-size: 12px;
+    padding: 2px 4px;
+}
+
+/* ═══ Status bar ═══════════════════════════════════════════════════ */
+.statusbar {
+    background: #e8e8e8;
+    border-top: 1px solid #aaa;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: #444;
+    font-family: 'Courier New', monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ═══ Leaflet overrides (supaya menyatu dengan tema desktop) ═══════ */
+.leaflet-container {
+    font-family: inherit;
+    background: #1c2e45;
+}
+.leaflet-control-attribution {
+    font-size: 9px;
+    opacity: 0.7;
+}
+
+/* ═══ ROV: kontrol & telemetri ═══════════════════════════════════ */
+
+/* Checkbox unlock diberi warna peringatan: mencentangnya membuat tombol
+   di bawahnya benar-benar menggerakkan perangkat keras, bukan sekadar
+   mengubah tampilan. */
+.cb-label.cb-danger {
+    color: #a02020;
+    font-weight: bold;
+}
+
+.rov-control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 4px;
+}
+.rov-control-group.disabled {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+/* Tombol toggle (lampu / depth hold / heading hold): status ON harus
+   terbaca sekilas, karena operator tidak selalu ingat apa yang sudah
+   dinyalakan. */
+.toggle-btn.on {
+    background: linear-gradient(to bottom, #ffe9a8 0%, #f5c842 100%);
+    border-color: #a8862a;
+    color: #3a2c00;
+    font-weight: bold;
+}
+
+/* Grid telemetri — 2 kolom, meniru tele_grid di panel PyQt5 */
+.tele-label {
+    font-weight: bold;
+    font-size: 13px;
+    margin: 4px 0 2px;
+    color: #222;
+}
+.tele-frame {
+    background: white;
+    border: 1px solid #aaa;
+    padding: 4px 6px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px 10px;
+}
+.tele-frame.stale { opacity: 0.5; }
+.tele-cell {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 1px 0;
+}
+.tele-key {
+    font-size: 11px;
+    color: #444;
+}
+.tele-val {
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    font-size: 12px;
+    color: #003d80;
+}
+
+/* Suhu internal berlebih: ROV didinginkan air, kalau dinyalakan di darat
+   angkanya naik terus dan itu perlu terlihat, bukan sekadar tercatat. */
+.tele-val.warn {
+    color: #b03030;
+    background: #ffe8e8;
+}
+
+@media (max-width: 1100px) {
+    .tele-frame { grid-template-columns: 1fr; }
+}
+
+/* ═══ Pilih kamera & statistik performa ══════════════════════════ */
+.ctl-select {
+    width: 100%;
+    background: white;
+    border: 1px solid #aaa;
+    padding: 4px 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: #003d80;
+    border-radius: 2px;
+}
+.ctl-select:disabled { color: #999; background: #f2f2f2; }
+
+/* Baris statistik: kecil dan tenang. Ini informasi diagnostik, bukan
+   sesuatu yang perlu dilihat operator terus-menerus — tapi harus ADA,
+   supaya "pakai GPU atau tidak" bisa dibaca, bukan ditebak. */
+.perf-line {
+    font-size: 10px;
+    font-family: 'Courier New', monospace;
+    color: #777;
+    padding: 2px 0 4px;
+    line-height: 1.5;
+    word-break: break-word;
+}
+.perf-line .perf-gpu { color: #1f7a1f; font-weight: bold; }
+.perf-line .perf-cpu { color: #b06000; font-weight: bold; }

@@ -1,0 +1,431 @@
+/* ═══════════════════════════════════════════════════════════════════
+   controls.css — Panel kendali wahana.
+
+   Prinsip tampilan di sini berbeda dari sisa dashboard: ini satu-satunya
+   bagian yang benar-benar menggerakkan perangkat keras, jadi statusnya
+   harus terbaca sekilas dari jarak satu lengan, di bawah matahari, oleh
+   orang yang sedang tidak tenang.
+
+   Karena itu: kontras tinggi, target sentuh besar (≥ 44 px), dan tidak ada
+   animasi yang menunda umpan balik.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.left-col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.pad-panel {
+    border: 2px solid #333;
+    background: #ececec;
+    padding: 8px;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;          /* cegah halaman ikut ter-scroll saat menggeser stick */
+}
+
+/* Terkunci: yang dikunci hanya KENDALI GERAK, bukan seluruh panel.
+   Konfigurasi controller (kalibrasi, deadzone, mode simulasi, pemetaan
+   kustom) tidak menggerakkan wahana, jadi tidak ada alasan menguncinya —
+   dan menguncinya justru membuat operator tidak bisa menyiapkan pad
+   sebelum menyentuh air.
+
+   CATATAN PENTING soal peredupan: `opacity` dan `filter` di elemen INDUK
+   membentuk satu grup rendering; anak tidak bisa keluar darinya dengan
+   `opacity:1` / `filter:none`. Karena itu peredupan diletakkan di anak
+   yang memang harus redup, bukan di `.pad-panel`. Sebelum beta8.1,
+   tombol STOP ikut redup 42% + grayscale walau ada aturan yang mencoba
+   membatalkannya — aturan itu tidak pernah bekerja. */
+.pad-panel.locked {
+    pointer-events: none;
+}
+
+/* Hanya area gerak yang meredup. */
+.pad-panel.locked .axis-bars,
+.pad-panel.locked .pad-body {
+    opacity: 0.42;
+    filter: grayscale(0.6);
+}
+
+/* Terang penuh dan bisa diklik walau terkunci:
+   STOP (keselamatan) + kaki panel & kotak pemetaan (konfigurasi).
+   Gerbang gerak yang sesungguhnya ada di JS (`if (!unlocked) return`),
+   bukan di CSS, jadi membuka klik di sini tidak membuka jalur perintah. */
+.pad-panel.locked .estop-btn,
+.pad-panel.locked .pad-foot,
+.pad-panel.locked .learn-box {
+    pointer-events: auto;
+}
+
+/* ─── Kepala panel ─────────────────────────────────────────────── */
+.pad-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.pad-title { font-weight: bold; font-size: 13px; }
+
+.vec-readout {
+    flex: 1;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    color: #555;
+    background: #fff;
+    border: 1px solid #bbb;
+    padding: 3px 6px;
+    white-space: pre;
+}
+/* Vektor bukan nol = wahana SEDANG bergerak. Ini keadaan yang tidak boleh
+   luput dari perhatian, jadi warnanya berubah, bukan sekadar angkanya. */
+.vec-readout.moving {
+    background: #fff4d6;
+    border-color: #c8942a;
+    color: #7a4b00;
+    font-weight: bold;
+}
+
+/* STOP: merah, besar, dan selalu di tempat yang sama. Tidak pernah
+   dipindah, tidak pernah disembunyikan, tidak pernah ikut meredup. */
+.estop-btn {
+    background: linear-gradient(to bottom, #e34b4b 0%, #b81c1c 100%);
+    color: #fff;
+    border: 2px solid #7d0f0f;
+    font-weight: bold;
+    font-size: 14px;
+    letter-spacing: 1px;
+    padding: 8px 16px;
+    min-height: 44px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+.estop-btn:active { background: #8f1010; }
+
+
+
+/* ─── Bar sumbu ────────────────────────────────────────────────── */
+/* Pembacaan angka saja tidak cukup: perbedaan thro:1 dan thro:2 mudah
+   terlewat, sementara panjang bar terbaca tanpa harus dibaca. */
+.axis-bars { margin-bottom: 8px; }
+.axis-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.axis-key {
+    width: 34px;
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    color: #666;
+}
+.axis-track {
+    flex: 1;
+    height: 8px;
+    background: #d8d8d8;
+    border: 1px solid #b0b0b0;
+    position: relative;
+    overflow: hidden;
+}
+/* Garis tengah menandai nol — tanpa itu, bar pendek ke kiri dan bar pendek
+   ke kanan terlihat sama. */
+.axis-track::before {
+    content: '';
+    position: absolute;
+    left: 50%; top: 0; bottom: 0;
+    width: 1px;
+    background: #999;
+}
+.axis-fill {
+    position: absolute;
+    top: 0; bottom: 0;
+    background: #2a7ac8;
+    width: 0;
+}
+
+/* ─── Badan: stick kiri | tombol | stick kanan ─────────────────── */
+.pad-body {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.stick-wrap { text-align: center; }
+
+.stick-pad {
+    width: 132px;
+    height: 132px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 42%, #fbfbfb 0%, #d2d2d2 78%, #b4b4b4 100%);
+    border: 2px solid #8a8a8a;
+    position: relative;
+    cursor: grab;
+    touch-action: none;
+}
+.stick-pad:active { cursor: grabbing; }
+
+/* Pad kanan hanya bergerak vertikal (lateral butuh thruster yang tidak ada),
+   jadi bentuknya dibuat lonjong supaya batasannya terlihat, bukan hanya
+   terasa saat dicoba. */
+.stick-pad.stick-vert {
+    width: 84px;
+    border-radius: 42px / 66px;
+}
+
+.stick-knob {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #6a6a6a 0%, #2c2c2c 70%, #141414 100%);
+    border: 2px solid #ff5a2b;   /* oranye, meniru topi stick pad fisiknya */
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+.stick-hint {
+    position: absolute;
+    font-size: 9px;
+    color: #6a6a6a;
+    pointer-events: none;
+    white-space: nowrap;
+}
+.stick-hint-t { top: 4px;  left: 50%; transform: translateX(-50%); }
+.stick-hint-b { bottom: 4px; left: 50%; transform: translateX(-50%); }
+.stick-hint-l { left: 4px;  top: 50%; transform: translateY(-50%); }
+.stick-hint-r { right: 4px; top: 50%; transform: translateY(-50%); }
+
+.stick-cap {
+    font-size: 10px;
+    color: #666;
+    margin-top: 3px;
+    font-family: 'Courier New', monospace;
+}
+
+/* ─── Tombol aksi ──────────────────────────────────────────────── */
+.pad-actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    align-content: center;
+}
+
+.pad-act-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    min-height: 46px;
+    padding: 4px 2px;
+    background: linear-gradient(to bottom, #fdfdfd 0%, #dcdcdc 100%);
+    border: 1px solid #999;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: inherit;
+}
+.pad-act-btn:active { background: #c8c8c8; }
+.pa-icon  { font-size: 15px; line-height: 1; }
+.pa-label { font-size: 9.5px; color: #333; text-align: center; line-height: 1.1; }
+.pa-hint  { font-size: 8px; color: #999; font-family: 'Courier New', monospace; }
+
+.pad-act-btn.on {
+    background: linear-gradient(to bottom, #ffe9a8 0%, #f5c842 100%);
+    border-color: #a8862a;
+}
+.pad-act-btn.on .pa-label { color: #3a2c00; font-weight: bold; }
+
+/* Dua alasan tombol bisa mati, dan keduanya harus terlihat BERBEDA.
+
+   Menunggu PCAP  → biru pudar, bergaris putus. Ini sementara; akan hidup
+                    sendiri begitu satu baris di rov_caps.py diubah.
+   Tidak ada perangkat → abu-abu rata, bergaris silang. Ini permanen sampai
+                    ada thruster samping yang dibeli dan dipasang.
+
+   Kalau keduanya terlihat sama, orang akan menunggu sesuatu yang tidak akan
+   pernah datang. */
+.pad-act-btn:disabled { cursor: not-allowed; }
+
+.pad-act-btn.pending-pcap {
+    background: #eef3f9;
+    border: 1px dashed #7a9fc4;
+    opacity: 0.72;
+}
+.pad-act-btn.pending-pcap .pa-label { color: #46688c; font-style: italic; }
+.pad-act-btn.pending-pcap::after {
+    content: 'PCAP';
+    position: absolute;
+    font-size: 7px;
+    color: #7a9fc4;
+}
+
+.pad-act-btn.pending-hardware {
+    background: repeating-linear-gradient(
+        45deg, #e8e8e8, #e8e8e8 4px, #dedede 4px, #dedede 8px);
+    border: 1px solid #b8b8b8;
+    opacity: 0.55;
+}
+.pad-act-btn.pending-hardware .pa-label { color: #888; text-decoration: line-through; }
+
+/* ─── Kaki panel ───────────────────────────────────────────────── */
+.pad-foot {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid #c4c4c4;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 4px 10px;
+    align-items: center;
+}
+
+.pad-status {
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    color: #999;
+}
+.pad-status.on { color: #1f7a1f; font-weight: bold; }
+
+.pad-calib-note {
+    font-family: 'Courier New', monospace;
+    font-size: 9px;
+    color: #888;
+}
+
+.mini-btn {
+    font-size: 10px;
+    padding: 3px 6px;
+    background: #f0f0f0;
+    border: 1px solid #a8a8a8;
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+.caps-note {
+    grid-column: 1 / -1;
+    font-size: 9.5px;
+    color: #7a6000;
+    background: #fffbe8;
+    border-left: 3px solid #d4a017;
+    padding: 3px 6px;
+    line-height: 1.4;
+}
+
+/* ─── Layar sempit (HP/tablet) ─────────────────────────────────── */
+/* Di HP, pad harus lebih besar, bukan lebih kecil: jempol jauh kurang
+   presisi dibanding kursor, dan operator memegang perangkat dengan dua
+   tangan sambil melihat air, bukan layar. */
+@media (max-width: 1100px) {
+    .pad-body {
+        grid-template-columns: auto 1fr auto;
+        gap: 6px;
+    }
+    .stick-pad { width: 118px; height: 118px; }
+    .stick-pad.stick-vert { width: 74px; }
+    .pad-actions { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 620px) {
+    .pad-body {
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas: "left right" "acts acts";
+        gap: 8px;
+    }
+    .stick-wrap:first-child { grid-area: left; }
+    .stick-wrap:last-child  { grid-area: right; }
+    .pad-actions {
+        grid-area: acts;
+        grid-template-columns: repeat(4, 1fr);
+    }
+    .stick-pad { width: 128px; height: 128px; }
+    .stick-pad.stick-vert { width: 82px; }
+    .pad-head { flex-wrap: wrap; }
+    .vec-readout { order: 3; flex-basis: 100%; }
+}
+
+/* ═══ Mode simulasi ═══════════════════════════════════════════════
+   Kesalahan yang berbahaya bukan "mengira mode nyata padahal simulasi" —
+   itu cuma membingungkan. Yang berbahaya kebalikannya: mengira sedang
+   simulasi padahal perintahnya sungguhan. Karena itu statusnya diberi
+   pita penuh selebar panel, bukan sekadar centang kecil di pojok. */
+.sim-banner {
+    background: repeating-linear-gradient(
+        45deg, #2e5c8a, #2e5c8a 10px, #27507a 10px, #27507a 20px);
+    color: #fff;
+    font-weight: bold;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    text-align: center;
+    padding: 5px;
+    margin-bottom: 6px;
+    border: 1px solid #1d3d5e;
+}
+.pad-panel.sim { background: #e6edf5; border-color: #2e5c8a; }
+.cb-label.cb-sim { color: #24507d; font-weight: bold; }
+
+/* ═══ Mode belajar ════════════════════════════════════════════════ */
+.learn-box {
+    margin-top: 8px;
+    border: 1px solid #b8b8b8;
+    background: #f7f7f7;
+    padding: 4px 6px;
+}
+.learn-box summary {
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 2px 0;
+}
+.learn-hint {
+    font-size: 10px;
+    color: #666;
+    line-height: 1.5;
+    margin: 4px 0 6px;
+}
+/* Peringatan "tidak ada gamepad". Sengaja tidak dibuat sehalus .learn-hint:
+   ini menjelaskan kenapa seluruh tabel di bawahnya tidak akan merespons. */
+.learn-warn {
+    font-size: 10px;
+    line-height: 1.5;
+    color: #7a4b00;
+    background: #fff4d6;
+    border: 1px solid #c8942a;
+    border-radius: 3px;
+    padding: 5px 7px;
+    margin: 0 0 6px;
+}
+.learn-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 6px;
+    align-items: center;
+    padding: 2px 0;
+    border-bottom: 1px solid #e4e4e4;
+}
+.lr-label { font-size: 11px; color: #333; }
+.lr-slot {
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: #1f6f1f;
+    background: #eaf6ea;
+    border: 1px solid #b9dab9;
+    padding: 1px 6px;
+    min-width: 44px;
+    text-align: center;
+}
+/* Belum dipetakan harus terlihat berbeda dari sudah — sekilas, tanpa
+   membaca. Daftar setengah jadi adalah keadaan normal saat memetakan. */
+.lr-slot.unset { color: #999; background: #f0f0f0; border-color: #d4d4d4; }
+.lr-btn {
+    font-size: 10px;
+    padding: 2px 8px;
+    border: 1px solid #a8a8a8;
+    background: #f0f0f0;
+    cursor: pointer;
+    min-width: 62px;
+}
+.lr-btn.waiting {
+    background: #ffe9a8;
+    border-color: #c8942a;
+    font-weight: bold;
+}
+.learn-btn-row { display: flex; gap: 6px; margin-top: 6px; }

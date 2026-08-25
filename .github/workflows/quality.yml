@@ -1,0 +1,40 @@
+name: Quality checks
+
+on:
+  push:
+    branches: [main]
+    tags: ['v.*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  static-and-safety-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Compile Python sources
+        run: python -m compileall -q detection tests
+
+      - name: Check controller JavaScript syntax
+        run: node --check static/detection/js/controls.js
+
+      - name: Run controller regression tests
+        run: python -m unittest discover -s tests -p 'test_beta81*.py'
+

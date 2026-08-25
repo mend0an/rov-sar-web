@@ -1,0 +1,26 @@
+# ─── Django stack ────────────────────────────────────────────────────────
+Django>=5.0,<5.2
+channels>=4.0
+daphne>=4.0
+
+# ─── Hardware I/O ────────────────────────────────────────────────────────
+pyserial>=3.5          # GPS NMEA (BU-353N5)
+av>=10.0               # PyAV — WAJIB untuk RTSP ROV, lihat catatan di bawah
+pygrabber>=0.2 ; sys_platform == "win32"   # enumerasi webcam DirectShow
+
+# ─── Computer vision ─────────────────────────────────────────────────────
+opencv-python>=4.8
+numpy>=1.24
+
+# PERINGATAN: JANGAN `pip install -r requirements.txt` ke environment yang
+# sudah punya torch build CUDA. pip akan mengambil wheel torch dari PyPI
+# (build CPU) dan menimpanya — deteksi tetap jalan tapi jadi sangat lambat,
+# dan gejalanya tidak jelas. Di environment lama, install manual saja:
+#     pip install "Django>=5.0,<5.2" channels daphne
+torch>=2.0
+ultralytics>=8.1
+
+# ─── Catatan RTSP ────────────────────────────────────────────────────────
+# `av` bukan opsional. OpenCV/FFmpeg tidak bisa mendekode stream RTSP ROV
+# Titan T1 dengan benar (gambar beku) apa pun transportnya; jalur RTSP
+# sekarang lewat PyAV di detection/rov_camera.py dengan transport UDP.

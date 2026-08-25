@@ -1,0 +1,250 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ROV SAR Detection</title>
+
+    <!-- Leaflet (LOKAL — supaya jalan offline di jaringan router ROV tanpa internet) -->
+    <link rel="stylesheet" href="{% static 'detection/vendor/leaflet/leaflet.css' %}"/>
+    <script src="{% static 'detection/vendor/leaflet/leaflet.js' %}"></script>
+
+    <link rel="stylesheet" href="{% static 'detection/css/dashboard.css' %}">
+    <link rel="stylesheet" href="{% static 'detection/css/controls.css' %}">
+</head>
+<body>
+
+<!-- ═══ Banner ════════════════════════════════════════════════════════ -->
+<div class="banner">
+    <img src="{% static 'detection/img/ROV_BANNER.jpg' %}"
+         alt="ROV SAR Detection" onerror="this.style.display='none'">
+</div>
+
+<!-- ═══ Main 3-column layout ═════════════════════════════════════════ -->
+<div class="main-layout">
+
+    <!-- ─── LEFT: Video feed + panel kendali ──────────────────────── -->
+    <div class="left-col">
+        <div class="video-panel">
+            <img id="video" src="/video" alt="Memuat video stream…">
+        </div>
+
+        <!-- Panel kendali. Sengaja di bawah video, bukan di kolom tengah:
+             di HP layoutnya menumpuk dan pad harus berada dalam jangkauan
+             jempol tanpa menutupi gambar. Kelas .locked meredupkannya sampai
+             operator membuka kunci secara sadar. -->
+        <div class="pad-panel locked" id="pad-panel">
+
+            <div class="sim-banner" id="sim-banner" style="display:none">
+                🧪 MODE SIMULASI — perintah TIDAK dikirim ke wahana
+            </div>
+
+            <div class="pad-head">
+                <span class="pad-title">🕹 Kendali Wahana</span>
+                <span class="vec-readout" id="vec-readout">thro: 0  lift: 0  yaw: 0</span>
+                <button id="btn-estop" class="estop-btn" title="Spasi / SELECT">STOP</button>
+            </div>
+
+            <div class="axis-bars">
+                <div class="axis-row"><span class="axis-key">thro</span>
+                    <div class="axis-track"><div class="axis-fill" id="bar-thro"></div></div></div>
+                <div class="axis-row"><span class="axis-key">lift</span>
+                    <div class="axis-track"><div class="axis-fill" id="bar-lift"></div></div></div>
+                <div class="axis-row"><span class="axis-key">yaw</span>
+                    <div class="axis-track"><div class="axis-fill" id="bar-yaw"></div></div></div>
+            </div>
+
+            <div class="pad-body">
+                <div class="stick-wrap">
+                    <div class="stick-pad" id="stick-left">
+                        <div class="stick-knob" id="knob-left"></div>
+                        <span class="stick-hint stick-hint-t">maju</span>
+                        <span class="stick-hint stick-hint-b">mundur</span>
+                        <span class="stick-hint stick-hint-l">putar ↺</span>
+                        <span class="stick-hint stick-hint-r">putar ↻</span>
+                    </div>
+                    <div class="stick-cap">Stick kiri — W A S D</div>
+                </div>
+
+                <div class="pad-actions" id="pad-actions"></div>
+
+                <div class="stick-wrap">
+                    <div class="stick-pad stick-vert" id="stick-right">
+                        <div class="stick-knob" id="knob-right"></div>
+                        <span class="stick-hint stick-hint-t">naik</span>
+                        <span class="stick-hint stick-hint-b">turun</span>
+                    </div>
+                    <div class="stick-cap">Stick kanan — ↑ ↓</div>
+                </div>
+            </div>
+
+            <div class="pad-foot">
+                <div class="pad-status" id="pad-status">○ Gamepad tidak terhubung</div>
+                <div class="pad-calib-note" id="pad-calib-note"></div>
+                <button id="btn-pad-calib" class="mini-btn">🎯 Kalibrasi Netral</button>
+                <label class="cb-label">
+                    <input type="checkbox" id="ctrl-keyboard" checked> Keyboard aktif
+                </label>
+                <label class="ctl-label">
+                    Deadzone — <span id="deadzone-label">15%</span>
+                </label>
+                <input type="range" id="ctrl-deadzone" min="0" max="40" value="15">
+                <label class="cb-label cb-sim">
+                    <input type="checkbox" id="ctrl-sim"> Mode simulasi (tanpa ROV)
+                </label>
+                <div class="caps-note" id="caps-note">memuat kapabilitas…</div>
+            </div>
+
+            <!-- Mode belajar. Ada karena pemetaan bawaan mengandaikan
+                 "standard gamepad mapping", dan pad yang tidak melaporkan
+                 dirinya standar akan memberi penomoran yang tidak cocok —
+                 gejalanya tombol melakukan hal yang SALAH, bukan tidak
+                 melakukan apa-apa. Menebak indeks yang benar bukan
+                 pekerjaan operator. -->
+            <details class="learn-box">
+                <summary>🎛 Pemetaan Kustom Controller</summary>
+                <div class="learn-hint">
+                    Nyalakan mode simulasi dulu, lalu tekan “petakan” dan
+                    tekan tombol yang diinginkan di controller. Untuk sumbu,
+                    dorong stick ke arah yang dimaksud.
+                </div>
+                <div id="learn-table"></div>
+                <div class="learn-btn-row">
+                    <button id="btn-map-save" class="mini-btn">💾 Simpan Profil</button>
+                    <button id="btn-map-reset" class="mini-btn">↺ Kembali ke Bawaan</button>
+                </div>
+            </details>
+        </div>
+    </div>
+
+    <!-- ─── MIDDLE: Controls (280px) ──────────────────────────────── -->
+    <div class="controls-panel">
+
+        <label class="ctl-label">Pilih Sumber Kamera:</label>
+        <select id="camera-select" class="ctl-select">
+            <option value="">memuat…</option>
+        </select>
+        <div class="status-line" id="capture-status">● Menginisialisasi</div>
+        <div class="perf-line" id="perf-line">—</div>
+
+        <label class="ctl-label">Depth (HOP) — <span id="hop-depth-label">1</span></label>
+        <input type="range" id="ctrl-hop-depth" min="1" max="7" value="1">
+
+        <label class="cb-label"><input type="checkbox" id="ctrl-hop"> Aktifkan HOP</label>
+        <label class="cb-label"><input type="checkbox" id="ctrl-clahe"> Aktifkan CLAHE</label>
+        <label class="cb-label"><input type="checkbox" id="ctrl-dehaze"> Aktifkan Dehaze</label>
+        <label class="cb-label"><input type="checkbox" id="ctrl-wb"> Aktifkan White Balance</label>
+        <label class="cb-label"><input type="checkbox" id="ctrl-yolo"> Aktifkan Deteksi YOLO</label>
+
+        <button id="btn-screenshot">📷  Ambil Screenshot</button>
+
+        <hr class="separator">
+
+        <div class="section-header">── GPS &amp; Peta ──</div>
+
+        <label class="ctl-label">Port GPS Serial:</label>
+        <div class="ctl-readonly" id="gps-source">memuat…</div>
+        <div class="status-line" id="gps-conn-status">● Menunggu fix</div>
+
+        <label class="cb-label"><input type="checkbox" id="ctrl-show-map" checked> Tampilkan Peta GPS</label>
+        <label class="cb-label"><input type="checkbox" id="ctrl-auto-wp"> Catat Waypoint Otomatis</label>
+        <label class="cb-label"><input type="checkbox" id="ctrl-mark-detect"> Tandai saat Deteksi YOLO</label>
+
+        <button id="btn-mark">📍  Tandai Lokasi Sekarang</button>
+        <button id="btn-export">💾  Ekspor Waypoint (.gpx)</button>
+        <button id="btn-clear">🗑  Hapus Semua Waypoint</button>
+
+        <hr class="separator">
+
+        <div class="section-header">── Telemetri ROV ──</div>
+
+        <div class="ctl-readonly" id="rov-source">memuat…</div>
+        <div class="status-line" id="rov-conn-status">● Menunggu telemetri</div>
+
+        <label class="cb-label">
+            <input type="checkbox" id="ctrl-rov-heading" checked>
+            Pakai Heading ROV (yaw)
+        </label>
+        <label class="cb-label">
+            <input type="checkbox" id="ctrl-rov-auto-depth" checked>
+            Depth HOP Otomatis dari ROV
+        </label>
+
+        <label class="cb-label cb-danger">
+            <input type="checkbox" id="ctrl-rov-unlock">
+            Buka Kunci Kontrol ROV
+        </label>
+
+        <div id="rov-control-group" class="rov-control-group disabled">
+            <button id="btn-rov-light" class="toggle-btn">💡  Lampu</button>
+            <button id="btn-rov-holdd" class="toggle-btn">⚓  Depth Hold</button>
+            <button id="btn-rov-holdy" class="toggle-btn">🧭  Heading Hold</button>
+        </div>
+    </div>
+
+    <!-- ─── RIGHT: GPS Map Panel (400px) ──────────────────────────── -->
+    <div class="gps-panel" id="gps-panel">
+
+        <div class="map-title">🛟  Peta GPS — Posisi Buoy Permukaan</div>
+
+        <div id="map"></div>
+
+        <div class="coord-frame">
+            <div class="coord-row">
+                <span class="coord-key">Latitude:</span>
+                <span class="coord-val" id="lat-val">—</span>
+                <span class="coord-key">Longitude:</span>
+                <span class="coord-val" id="lon-val">—</span>
+            </div>
+            <div class="coord-row">
+                <span class="coord-key">Kedalaman:</span>
+                <span class="coord-val" id="depth-val">—</span>
+                <span class="coord-key">Heading:</span>
+                <span class="coord-val" id="hdg-val">—</span>
+            </div>
+        </div>
+
+        <div class="tele-label">Telemetri ROV:</div>
+        <div class="tele-frame" id="tele-frame">
+            <div class="tele-cell"><span class="tele-key">Roll</span><span class="tele-val" id="tele-R">—</span></div>
+            <div class="tele-cell"><span class="tele-key">Pitch</span><span class="tele-val" id="tele-P">—</span></div>
+            <div class="tele-cell"><span class="tele-key">Yaw</span><span class="tele-val" id="tele-Y">—</span></div>
+            <div class="tele-cell"><span class="tele-key">Kedalaman</span><span class="tele-val" id="tele-D">—</span></div>
+            <div class="tele-cell"><span class="tele-key">Suhu air</span><span class="tele-val" id="tele-to">—</span></div>
+            <div class="tele-cell"><span class="tele-key">Suhu dalam</span><span class="tele-val" id="tele-ti">—</span></div>
+            <div class="tele-cell"><span class="tele-key">Baterai</span><span class="tele-val" id="tele-batv">—</span></div>
+            <div class="tele-cell"><span class="tele-key">Waktu operasi</span><span class="tele-val" id="tele-RT">—</span></div>
+        </div>
+
+        <div class="wp-table-label">Waypoint Log:</div>
+        <div class="wp-table-wrap">
+            <table id="wp-table">
+                <thead>
+                    <tr>
+                        <th class="col-dot"></th>
+                        <th>Nama</th>
+                        <th>Latitude</th>
+                        <th>Longitude</th>
+                    </tr>
+                </thead>
+                <tbody id="wp-tbody"></tbody>
+            </table>
+        </div>
+
+        <div class="map-btn-row">
+            <button id="btn-zoom-in">+  Zoom In</button>
+            <button id="btn-zoom-out">−  Zoom Out</button>
+            <button id="btn-center">⌖  Ke Buoy</button>
+        </div>
+    </div>
+
+</div>
+
+<!-- ═══ Status bar ═══════════════════════════════════════════════════ -->
+<div class="statusbar" id="status-msg">Status: Menginisialisasi...</div>
+
+<script src="{% static 'detection/js/dashboard.js' %}"></script>
+<script src="{% static 'detection/js/controls.js' %}"></script>
+</body>
+</html>
