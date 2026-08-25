@@ -333,6 +333,26 @@ class TestEffectiveBindings(unittest.TestCase):
                              "thro tidak disebut di profil, harus tetap bawaan")
         self.assertIsNotNone(r["axes"]["yaw"]["fallback"])
 
+    def test_digital_buttons_can_map_both_directions(self):
+        r = self.run_js({"b7": "thro", "b6": "thro_neg"},
+                        self.DEFAULT_AXES)
+        self.assertEqual(r["axes"]["thro"]["slots"], ["b7", "b6"])
+        self.assertEqual(r["axes"]["thro"]["negative"], ["b6"])
+        self.assertEqual([a for sl, a in r["buttons"] if sl in ("b6", "b7")],
+                         [], "tombol arah tidak boleh ikut jalur aksi biasa")
+
+    def test_all_reverse_directions_are_learnable(self):
+        src = JS_CONTROLS.read_text(encoding="utf-8")
+        profile_src = (ROOT / "detection" / "controller_profiles.py").read_text(
+            encoding="utf-8")
+        for action, label in (("thro_neg", "Mundur"),
+                              ("lift_neg", "Turun"),
+                              ("yaw_neg", "Putar kiri")):
+            self.assertIn(f"['{action}',", src)
+            self.assertIn(label, src)
+            self.assertIn(f'"{action}"', profile_src,
+                          "backend harus menerima aksi arah negatif")
+
     # ── Arah kedua: SLOT fisik yang bentrok ──────────────────────────────
     # Ketiganya lolos di beta8.1 awal. Aturan override waktu itu hanya
     # melihat aksi, jadi binding bawaan pada slot yang sudah diambil tetap
@@ -389,6 +409,40 @@ class TestEffectiveBindings(unittest.TestCase):
     def test_uncalibrated_pad_does_not_crash(self):
         r = self.run_js(None, None)
         self.assertIsNone(r["axes"]["thro"]["fallback"])
+
+
+@unittest.skipUnless(shutil.which("node"), "node tidak tersedia — uji dilewati")
+class TestStandardGamepadCalibration(unittest.TestCase):
+    """Pad standar tidak boleh salah dikalibrasi dari gerakan pemicu koneksi."""
+
+    def test_first_vertical_motion_does_not_remove_xbox_axes(self):
+        src = JS_CONTROLS.read_text(encoding="utf-8")
+        fn = _slice_function(src, "calibratePad")
+        script = "\n".join([
+            "const gp = {mapping:'standard', axes:[0,-1,0,0]};",
+            "const navigator = {getGamepads: () => [gp]};",
+            "const $ = () => null;",
+            "let padIndex=0, padRest=null, padAxisMap=null;",
+            fn,
+            "calibratePad();",
+            "console.log(JSON.stringify({padRest, padAxisMap}));",
+        ])
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                         encoding="utf-8") as f:
+            f.write(script)
+            path = f.name
+        try:
+            out = subprocess.run(["node", path], capture_output=True, text=True,
+                                 timeout=20)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            result = json.loads(out.stdout)
+        finally:
+            os.unlink(path)
+
+        self.assertEqual(result["padRest"][:4], [0, 0, 0, 0])
+        self.assertEqual(result["padAxisMap"]["yaw"]["axis"], 0)
+        self.assertEqual(result["padAxisMap"]["thro"]["axis"], 1)
+        self.assertEqual(result["padAxisMap"]["lift"]["axis"], 3)
 
 
 # ═════════════════════════════════════════════════════════════════════════

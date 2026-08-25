@@ -88,6 +88,25 @@
     font-weight: bold;
 }
 
+.move-heartbeat {
+    flex: 0 0 auto;
+    min-width: 66px;
+    padding: 4px 6px;
+    border: 1px solid #999;
+    border-radius: 3px;
+    background: #fff;
+    color: #555;
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    font-weight: bold;
+    text-align: center;
+    white-space: nowrap;
+}
+.move-heartbeat.idle { background: #eee; color: #666; }
+.move-heartbeat.waiting { background: #fff4d6; color: #7a4b00; border-color: #c8942a; }
+.move-heartbeat.ok { background: #e4f5e4; color: #176b17; border-color: #5c9e5c; }
+.move-heartbeat.error { background: #ffe5e5; color: #a01818; border-color: #c85a5a; }
+
 /* STOP: merah, besar, dan selalu di tempat yang sama. Tidak pernah
    dipindah, tidak pernah disembunyikan, tidak pernah ikut meredup. */
 .estop-btn {
@@ -325,6 +344,32 @@
 }
 
 @media (max-width: 620px) {
+    .pad-panel { padding: 6px; }
+    .pad-head {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        grid-template-areas:
+            "title heartbeat stop"
+            "vector vector vector";
+        gap: 6px;
+        align-items: center;
+    }
+    .pad-title { grid-area: title; }
+    .move-heartbeat { grid-area: heartbeat; }
+    .estop-btn {
+        grid-area: stop;
+        width: auto;
+        min-width: 96px;
+        margin: 0;
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+    .vec-readout {
+        grid-area: vector;
+        width: 100%;
+        min-width: 0;
+        font-size: 12px;
+    }
     .pad-body {
         grid-template-columns: 1fr 1fr;
         grid-template-areas: "left right" "acts acts";
@@ -338,8 +383,6 @@
     }
     .stick-pad { width: 128px; height: 128px; }
     .stick-pad.stick-vert { width: 82px; }
-    .pad-head { flex-wrap: wrap; }
-    .vec-readout { order: 3; flex-basis: 100%; }
 }
 
 /* ═══ Mode simulasi ═══════════════════════════════════════════════

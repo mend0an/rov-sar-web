@@ -45,7 +45,7 @@ _LOCK = threading.Lock()
 # menangkap salah ketik saat profil disunting tangan, sebelum operator
 # bingung kenapa satu tombol tidak melakukan apa pun.
 VALID_ACTIONS = {
-    "thro", "lift", "yaw", "lateral",
+    "thro", "thro_neg", "lift", "lift_neg", "yaw", "yaw_neg", "lateral",
     "gear_up", "gear_down",
     "holdd", "holdy",
     "tilt_up", "tilt_down", "posture",

@@ -53,13 +53,6 @@ POLL_INTERVAL_S = 1.0 / BROADCAST_HZ
 # gerak maju hanya beberapa puluh sentimeter.
 MOVE_DEADMAN_S = 1.5
 
-# ROV mengunci perintah, jadi mengirim ulang nilai yang sama sebenarnya tidak
-# perlu. Tapi selama PCAP belum menjawab apakah vendor mengirim periodik atau
-# hanya saat berubah, mengirim ulang pelan-pelan adalah taruhan yang aman:
-# kalau ternyata firmware punya timeout internal, latch-nya tetap segar; kalau
-# tidak, biayanya cuma dua paket per detik.
-MOVE_REPEAT_S = 0.5
-
 # Kalau STOP deadman gagal (mis. WiFi/soket tersendat), jangan menyerah.
 # Retry dibatasi 0.5 s agar tetap responsif tanpa membanjiri soket/log.
 DEADMAN_STOP_RETRY_S = 0.5
@@ -118,14 +111,15 @@ class RovWorker(threading.Thread):
 
     def send_move(self, thro: int, lift: int, yaw: int) -> bool:
         """
-        Kirim vektor gerak. Sumbu yang nilainya tidak berubah TIDAK dikirim
-        ulang kecuali sudah lewat MOVE_REPEAT_S.
+        Kirim vektor gerak. Setiap SUMBU aktif diteruskan pada setiap heartbeat
+        browser (10 Hz). Sumbu nol tidak ikut diulang karena perintah seperti
+        `yaw:0` yang dikirim setelah `thro:2` dapat membatalkan gerak pada
+        firmware. Ini sengaja meniru pola aplikasi vendor: kirim hanya sumbu
+        yang sedang dipakai, bukan satu vektor tiga-sumbu setiap tick.
 
-        Browser mengirim 10 Hz supaya deadman punya denyut yang bisa dihitung,
-        tapi meneruskan 30 paket TCP per detik ke wahana hanya karena operator
-        menahan stick di posisi yang sama itu pemborosan yang tidak membeli
-        apa pun. Dedupe di sini, bukan di browser — supaya berlaku sama untuk
-        semua sumber masukan.
+        Nilai nol tetap dikirim sekali ketika suatu sumbu berubah dari aktif
+        menjadi nol, lalu dideduplikasi. Jadi pelepasan stick tetap menghentikan
+        sumbu tersebut tanpa menimpa sumbu aktif lain setiap 100 ms.
 
         Safety: bila force_stop sedang diminta/berjalan, MOVE ditolak. Cek
         dilakukan sebelum DAN sesudah memperoleh `_move_lock`: yang pertama
@@ -146,9 +140,10 @@ class RovWorker(threading.Thread):
             if self._force_stop_active.is_set():
                 return False
 
-            force = (now - self._last_move_sent_at) >= MOVE_REPEAT_S
             for axis, value in vec.items():
-                if value != self._last_move_vec[axis] or force:
+                axis_changed = value != self._last_move_vec[axis]
+                refresh_active = value != 0
+                if axis_changed or refresh_active:
                     ok &= self._rov.send(axis, value)
                     changed = True
                 self._last_move_vec[axis] = value

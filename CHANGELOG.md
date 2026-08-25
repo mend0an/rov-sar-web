@@ -1117,3 +1117,58 @@ Sekarang:
 
 Dua butir pertama tetap dicatat sebagai opsi safety policy untuk trial ROV,
 bukan bagian patch bug v.beta8.1c ini.
+
+## v.beta8.1d — Hold gerak 10 Hz + UI HP (2026-08-25)
+
+Patch ini hanya menyentuh jalur kendali web dan tampilannya.
+
+- `detection/rov_worker.py`: selama salah satu sumbu gerak aktif, vektor
+  lengkap diteruskan ke Titan pada setiap heartbeat browser (10 Hz). Vektor
+  nol identik tetap dideduplikasi agar soket tidak dibanjiri saat diam.
+- `MOVE_DEADMAN_S` tetap `1.5` detik. Transaksi STOP atomik beta8.1c tidak
+  diubah.
+- `static/detection/js/controls.js`: `pointerleave` tidak lagi melepas stick.
+  Pelepasan hanya terjadi pada `pointerup`, `pointercancel`, atau
+  `lostpointercapture`.
+- Ditambahkan indikator `TX n Hz`, `TX menunggu`, `TX macet`, dan `TX gagal`
+  berdasarkan respons nyata `/api/rov/move`.
+- Tampilan HP: panel video memakai rasio 16:9 tanpa minimum tinggi desktop;
+  judul, indikator TX, STOP, dan pembacaan vektor ditata ulang agar ringkas.
+- Tes regresi baru: `tests/test_beta81d_hold_heartbeat.py`.
+
+## v.beta8.1e — Hotfix pengulangan per sumbu (2026-08-25)
+
+Beta8.1d salah mengulang vektor lengkap pada setiap heartbeat. Contohnya,
+maju menghasilkan urutan `thro:2; lift:0; yaw:0;`. Pada perangkat nyata,
+perintah nol setelah perintah aktif dapat membatalkan gerak sehingga maju,
+mundur, naik, dan turun tidak bekerja.
+
+Hotfix ini mengubah aturan menjadi per sumbu:
+
+- sumbu aktif diulang 10 Hz, misalnya `thro:2; thro:2; ...`;
+- sumbu lain yang nol tidak ikut dikirim;
+- ketika sumbu aktif dilepas, nol dikirim tepat sekali pada sumbu tersebut;
+- vektor diam identik tetap dideduplikasi;
+- deadman server tetap 1,5 detik dan transaksi STOP tidak diubah.
+
+Regresi ditambah untuk memastikan sumbu nol tidak menimpa sumbu aktif.
+
+## v.beta8.1f — Enam arah mapping + kalibrasi Xbox (2026-08-25)
+
+Versi ini mempertahankan hotfix gerak per-sumbu beta8.1e dan memperbaiki dua
+celah di pemetaan gamepad:
+
+- tabel pemetaan sekarang menampilkan enam arah eksplisit: Maju, Mundur,
+  Naik, Turun, Putar kanan, dan Putar kiri;
+- tombol digital/D-pad untuk Mundur, Turun, dan Putar kiri dibalik menjadi
+  nilai sumbu negatif sebelum dikirim;
+- backend profil menerima aksi `thro_neg`, `lift_neg`, dan `yaw_neg`;
+- profil lama tetap kompatibel;
+- gamepad ber-mapping standar (termasuk Xbox di Chrome/Edge) selalu memakai
+  sumbu baku LX, LY, RX, RY dengan netral nol;
+- gerakan stick yang pertama kali memicu event koneksi tidak lagi salah
+  dianggap sebagai posisi netral/trigger dan membuang sumbu vertikal.
+
+Untuk stick analog, satu sumbu tetap menghasilkan kedua arah. Enam baris
+terpisah diperlukan agar controller yang memakai tombol digital terpisah bisa
+memetakan arah positif dan negatif secara eksplisit.

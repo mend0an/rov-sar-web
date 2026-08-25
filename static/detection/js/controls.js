@@ -56,7 +56,8 @@
     // dan klaim lama akan kedaluwarsa sendiri di server dalam 3 detik.
     const CLIENT_ID = 'c' + Math.random().toString(36).slice(2, 10);
 
-    // Tiga aksi yang bernilai analog. Sisanya diperlakukan sebagai tombol.
+    // Tiga sumbu gerak. Profil juga menerima varian *_neg untuk tombol
+    // digital arah sebaliknya (mundur, turun, putar kiri).
     const MOVE_ACTIONS = ['thro', 'lift', 'yaw'];
 
     // ─── State ───────────────────────────────────────────────────────
@@ -83,6 +84,10 @@
     let customMap = null;        // {slot: aksi} dari server; null = pakai bawaan
     let learnSlot = null;        // aksi yang sedang menunggu tombol ditekan
     let simMode = false;
+    let movementWanted = false;
+    let moveAckTimes = [];
+    let lastMoveAckAt = 0;
+    let lastMoveErrorAt = 0;
 
     // ═════════════════════════════════════════════════════════════════
     //  Util
@@ -126,6 +131,54 @@
     // ═════════════════════════════════════════════════════════════════
     //  Pengiriman
     // ═════════════════════════════════════════════════════════════════
+    function recordMoveAck() {
+        const now = performance.now();
+        lastMoveAckAt = now;
+        lastMoveErrorAt = 0;
+        moveAckTimes.push(now);
+        moveAckTimes = moveAckTimes.filter((t) => now - t <= 1000);
+        paintMoveHeartbeat();
+    }
+
+    function recordMoveError() {
+        lastMoveErrorAt = performance.now();
+        paintMoveHeartbeat();
+    }
+
+    /** Status nyata aliran /api/rov/move, bukan sekadar posisi stick. */
+    function paintMoveHeartbeat() {
+        const el = $('move-heartbeat');
+        if (!el) return;
+
+        const now = performance.now();
+        moveAckTimes = moveAckTimes.filter((t) => now - t <= 1000);
+        el.className = 'move-heartbeat';
+
+        if (!unlocked) {
+            el.textContent = 'TX terkunci';
+            el.classList.add('idle');
+            return;
+        }
+        if (!movementWanted) {
+            el.textContent = 'TX siaga';
+            el.classList.add('idle');
+            return;
+        }
+        if (lastMoveErrorAt && now - lastMoveErrorAt < 1500) {
+            el.textContent = 'TX gagal';
+            el.classList.add('error');
+            return;
+        }
+        if (!lastMoveAckAt || now - lastMoveAckAt > 700) {
+            el.textContent = sendInFlight ? 'TX menunggu' : 'TX macet';
+            el.classList.add(sendInFlight ? 'waiting' : 'error');
+            return;
+        }
+
+        el.textContent = `TX ${moveAckTimes.length} Hz`;
+        el.classList.add('ok');
+    }
+
     async function pushVector(vec) {
         // Anti-tumpukan: kalau request sebelumnya belum kembali (WiFi tersendat),
         // lewati siklus ini. Menumpuk request 10 Hz di atas jaringan yang sudah
@@ -140,7 +193,10 @@
                 body: JSON.stringify({ ...vec, client_id: CLIENT_ID }),
             });
             const j = await r.json();
-            if (!j.ok) {
+            if (r.ok && j.ok) {
+                recordMoveAck();
+            } else {
+                recordMoveError();
                 if (r.status === 409 && j.pilot) {
                     status('⚠ Klien lain sedang memegang kendali gerak');
                 } else {
@@ -149,6 +205,7 @@
                 zeroSources();
             }
         } catch (e) {
+            recordMoveError();
             status('❌ Gerak: koneksi gagal');
         } finally {
             sendInFlight = false;
@@ -184,6 +241,8 @@
         if (!unlocked) return;
 
         const moving = vec.thro !== 0 || vec.lift !== 0 || vec.yaw !== 0;
+        movementWanted = moving;
+        paintMoveHeartbeat();
         if (moving) {
             zeroBudget = ZERO_REPEAT;
             lastSent = vec;
@@ -253,7 +312,8 @@
             onMove(dx, -dy);
         }
 
-        function release() {
+        function release(pointerId) {
+            if (pointerId !== undefined && active !== pointerId) return;
             active = null;
             knob.style.transform = 'translate(-50%, -50%)';
             onMove(0, 0);
@@ -271,10 +331,13 @@
             place(e.clientX, e.clientY);
             e.preventDefault();
         });
-        for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
+        // Pointer capture membuat stick tetap aktif walau jari/kursor keluar
+        // dari lingkaran. `pointerleave` bukan pelepasan dan tidak boleh
+        // menolkan gerak saat operator masih menahan stick.
+        for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
             pad.addEventListener(ev, (e) => {
                 if (active !== e.pointerId) return;
-                release();
+                release(e.pointerId);
             });
         }
 
@@ -540,9 +603,22 @@
     function calibratePad() {
         const gp = navigator.getGamepads ? navigator.getGamepads()[padIndex] : null;
         if (!gp) return;
-        padRest = Array.from(gp.axes);
-        const sticks = [];
-        padRest.forEach((v, i) => { if (Math.abs(v) <= 0.5) sticks.push(i); });
+        const standard = gp.mapping === 'standard' && gp.axes.length >= 4;
+
+        // Untuk mapping standar, spesifikasi Gamepad API sudah menetapkan
+        // axes 0..3 sebagai LX, LY, RX, RY dan titik netralnya nol. Jangan
+        // mengambil posisi SAAT event koneksi sebagai titik netral: browser
+        // sering baru mengenali pad setelah stick pertama kali digerakkan.
+        // Jika gerakan awal itu maju, snapshot lama merekam LY=-1 sebagai
+        // "trigger", membuang sumbu thro, lalu gejalanya persis: yaw hidup,
+        // maju/mundur dan naik/turun mati sampai kalibrasi manual dilakukan.
+        padRest = standard ? Array(gp.axes.length).fill(0) : Array.from(gp.axes);
+        const sticks = standard ? [0, 1, 2, 3] : [];
+        if (!standard) {
+            padRest.forEach((v, i) => {
+                if (Math.abs(v) <= 0.5) sticks.push(i);
+            });
+        }
 
         // Urutan stick yang tersisa setelah trigger disingkirkan hampir selalu
         // LX, LY, RX, RY. Kalau ternyata tidak, tab Monitor di alat pemetaan
@@ -557,7 +633,8 @@
         if (el) {
             const trig = padRest.map((v, i) => (Math.abs(v) > 0.5 ? i : null))
                                 .filter((x) => x !== null);
-            el.textContent = `sumbu stick: ${sticks.join(', ') || '—'}` +
+            el.textContent = `${standard ? 'standar · ' : ''}sumbu stick: ` +
+                             `${sticks.join(', ') || '—'}` +
                              (trig.length ? ` · trigger: ${trig.join(', ')}` : '');
         }
     }
@@ -637,8 +714,15 @@
 
         const axes = {};
         for (const act of MOVE_ACTIONS) {
-            const slots = Object.keys(custom).filter((sl) => custom[sl] === act);
-            if (slots.length) { axes[act] = { slots }; continue; }
+            const positive = Object.keys(custom)
+                .filter((sl) => custom[sl] === act);
+            const negative = Object.keys(custom)
+                .filter((sl) => custom[sl] === act + '_neg');
+            const slots = positive.concat(negative);
+            if (slots.length) {
+                axes[act] = { slots, negative };
+                continue;
+            }
             const fb = padAxisMap ? padAxisMap[act] : null;
             // Sumbu bawaannya sudah diambil aksi lain: lepaskan, jangan
             // dibiarkan membaca sumbu yang sama diam-diam.
@@ -650,7 +734,8 @@
         // punya dua penghitung status yang bergerak sendiri-sendiri.
         const buttons = [];
         for (const [slot, act] of Object.entries(custom)) {
-            if (!MOVE_ACTIONS.includes(act) && act !== 'none') buttons.push([slot, act]);
+            const isMove = MOVE_ACTIONS.includes(act) || act.endsWith('_neg');
+            if (!isMove && act !== 'none') buttons.push([slot, act]);
         }
         for (const [idx, act] of Object.entries(PAD_BUTTONS)) {
             if (overridden.has(act)) continue;
@@ -686,7 +771,8 @@
             let v = 0;
             if (b.slots) {
                 for (const sl of b.slots) {
-                    const r = readSlot(gp, sl);
+                    let r = readSlot(gp, sl);
+                    if ((b.negative || []).includes(sl)) r = -r;
                     if (Math.abs(r) > Math.abs(v)) v = r;
                 }
             } else if (b.fallback && gp.axes[b.fallback.axis] !== undefined) {
@@ -764,8 +850,11 @@
 
     const LEARNABLE = [
         ['thro',      'Maju (dorong stick maju)'],
+        ['thro_neg',  'Mundur'],
         ['yaw',       'Putar kanan'],
+        ['yaw_neg',   'Putar kiri'],
         ['lift',      'Naik'],
+        ['lift_neg',  'Turun'],
         ['holdy',     'Heading lock'],
         ['holdd',     'Depth lock'],
         ['light',     'Lampu'],
@@ -1166,6 +1255,8 @@
         renderLearnTable();
         loadCaps();
         setInterval(tick, SEND_INTERVAL_MS);
+        setInterval(paintMoveHeartbeat, 250);
+        paintMoveHeartbeat();
     }
 
     // Dipanggil dashboard.js saat status unlock / telemetri berubah.

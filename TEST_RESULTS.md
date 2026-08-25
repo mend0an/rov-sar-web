@@ -377,3 +377,72 @@ sebelum trial hardware.
 Belum ada uji dengan Geneinno Titan T1 nyata. Patch ini memvalidasi logika
 software concurrency/failure handling; respons fisik thruster terhadap STOP
 masih harus diuji terkontrol.
+
+---
+
+# TEST RESULTS — v.beta8.1d (hold 10 Hz + UI HP)
+
+## Hasil otomatis
+
+- `tests/test_beta81d_hold_heartbeat.py`: **8/8 PASS**.
+- Gabungan `test_beta81d_hold_heartbeat`, `test_beta81_controller`, dan
+  `test_beta81c_atomic_stop`: **69 test, 53 PASS, 16 SKIP**.
+- Enam uji transaksi STOP/deadman beta8.1c tetap PASS.
+- `node --check static/detection/js/controls.js`: PASS.
+- `python -m compileall detection tests`: PASS.
+
+Enam belas skip adalah uji endpoint yang memerlukan Django. Environment
+review ini tidak memiliki Django; jalankan kembali di environment `yolo_sar`
+sebelum trial perangkat keras.
+
+## Yang dijaga oleh regresi beta8.1d
+
+- Vektor aktif identik diteruskan pada setiap heartbeat 10 Hz.
+- Vektor nol identik tetap dideduplikasi.
+- Deadman server tetap tepat 1,5 detik.
+- `pointerleave` tidak melepas joystick; tiga event pelepasan yang benar ada.
+- Indikator heartbeat `/api/rov/move` tersedia dan diperbarui dari ACK.
+- Video HP tidak lagi memakai minimum tinggi desktop 480 px.
+- Tombol STOP HP tidak lagi dipaksa selebar panel.
+
+## Batas validasi
+
+Belum diuji terhadap thruster nyata. Uji awal harus dilakukan dengan wahana
+diamankan, daya rendah, dan ruang bebas di sekitar baling-baling. Saat stick
+ditahan, indikator normal di browser adalah `TX 8–10 Hz`; bila menjadi
+`TX macet` atau `TX gagal`, hentikan trial dan periksa koneksi sebelum lanjut.
+
+---
+
+# TEST RESULTS — v.beta8.1e (hotfix pengulangan per sumbu)
+
+- Regresi gabungan: **71 test, 55 PASS, 16 SKIP**.
+- Regresi khusus hold/UI: **10/10 PASS**.
+- Gerak maju berulang menghasilkan hanya `thro:n`, tanpa `lift:0/yaw:0`.
+- Gerak naik berulang menghasilkan hanya `lift:n`, tanpa `thro:0/yaw:0`.
+- Sumbu yang dilepas menerima satu perintah nol.
+- Vektor nol identik tetap dideduplikasi.
+- Deadman server tetap 1,5 detik.
+- Sintaks JavaScript dan kompilasi Python: PASS.
+
+Enam belas skip tetap berasal dari uji endpoint yang memerlukan Django pada
+environment review. Uji perangkat keras diperlukan untuk konfirmasi akhir.
+
+---
+
+# TEST RESULTS — v.beta8.1f (mapping enam arah + kalibrasi Xbox)
+
+- Regresi gabungan: **74 test, 58 PASS, 16 SKIP**.
+- Keenam arah gerak tersedia di tabel pemetaan.
+- Tombol digital arah negatif menghasilkan nilai sumbu negatif.
+- Backend menerima tiga aksi baru: `thro_neg`, `lift_neg`, `yaw_neg`.
+- Profil lama tanpa aksi negatif tetap kompatibel.
+- Gamepad standar yang pertama kali terdeteksi ketika LY sedang didorong tetap
+  memetakan yaw=axis 0, thro=axis 1, dan lift=axis 3.
+- Hotfix per-sumbu beta8.1e tetap lulus: sumbu aktif diulang 10 Hz tanpa nol
+  dari sumbu lain membatalkannya.
+- Deadman 1,5 detik dan transaksi STOP tetap lulus.
+- `node --check` dan kompilasi Python: PASS.
+
+Enam belas skip berasal dari uji endpoint yang membutuhkan Django. Validasi
+akhir tetap perlu dilakukan pada controller dan ROV nyata dengan daya rendah.

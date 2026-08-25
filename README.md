@@ -1,4 +1,4 @@
-# ROV SAR Detection — Django Web Edition (v.beta8.1c)
+# ROV SAR Detection — Django Web Edition (v.beta8.1f)
 
 Versi web-based dari aplikasi PyQt5 **ROV SAR Detection** (human body
 detection untuk search-and-rescue). Backend (Python/Django) jalan di laptop
