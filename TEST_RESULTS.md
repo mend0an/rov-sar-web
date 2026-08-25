@@ -7,7 +7,7 @@ dipakai di jalur debounce). Hardware ROV/GPS/RTSP TIDAK tersedia → fake worker
 
 ## Koreksi dari v.beta2 (bug yang dilaporkan reviewer)
 
-Enam koreksi sudah dikerjakan:
+Lima koreksi sudah dikerjakan:
 1. Fake JPEG sekarang di-generate cv2.imencode() → JPEG VALID (bisa di-decode),
    bukan byte hex manual yang cuma punya marker.
 2. tests/test_harness.py: hex rusak diganti generator cv2 → jalan normal.
@@ -17,7 +17,6 @@ Enam koreksi sudah dikerjakan:
    `manage.py check` DAN command lain TIDAK menyalakan kamera/GPS/YOLO.
 5. test_mjpeg_client.py: sekarang PARSE multipart + cv2.imdecode() tiap frame
    (bukan cuma hitung marker SOI). test_gps.py: watchdog RUNTIME test.
-6. Komentar "korosi" di capture.py diganti "tubuh/objek SAR".
 
 ---
 
@@ -71,8 +70,6 @@ belum (butuh hardware).
 ### FIX #6 — Rename honest                                      ✅ PASS
 - "Posisi ROV" → "Posisi Buoy Permukaan"                         ✓
 - "Ke ROV" → "Ke Buoy"                                           ✓
-- Komentar "korosi" di capture.py → "tubuh/objek SAR"            ✓
-- grep konfirmasi: 0 referensi korosi tersisa di kode SAR        ✓
 
 ### FIX #7 — WebSocket broadcast multi-client                   ✅ PASS
 Test: tests/test_ws_broadcast.py (2 client WS + trigger REST)

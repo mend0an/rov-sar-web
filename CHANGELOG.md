@@ -1,9 +1,7 @@
 # CHANGELOG — rov_sar_web v.beta (SAR)
 
 Konteks: migrasi aplikasi ROV SAR (human body detection) dari PyQt5 ke
-dashboard Django web. **Bukan** aplikasi korosi — fitur korosi (segmentasi,
-severity, XAI, hull-relative coordinate, audit trail) ditunda ke branch
-terpisah setelah dataset korosi tersedia.
+dashboard Django web.
 
 Versi ini mengimplementasi 7 perbaikan reliability hasil review teknis
 v.alpha, semuanya sudah diuji end-to-end (lihat TEST_RESULTS.md).
@@ -127,12 +125,6 @@ registry, disimpan lokal supaya jalan tanpa internet.
 - Model YOLO default: `rov_small_yolo11s_720_datatrain_hopv2`.
 - Endpoint screenshot, source label display, heartbeat status.
 
-## Yang DITUNDA (branch korosi, setelah dataset tersedia)
-
-Segmentasi korosi, severity classification, XAI, hull-relative coordinate,
-tracking/dedup cacat, database audit trail, agentic decision loop. Semua ini
-BUKAN scope v.beta SAR.
-
 ## Catatan HOP GPU (belum dikerjakan — perlu profiling)
 
 Pipeline HOP saat ini: `torch.from_numpy → .to(device) → dot → .cpu().numpy()`
@@ -165,10 +157,6 @@ test_mjpeg_client, test_gps), sebagian lagi DI KODE PRODUKSI: offline grid
   bukan cuma teks "OFFLINE MODE".
 - **Guard map menyeluruh**: `map.invalidateSize/zoomIn/zoomOut/setView` semua
   dibungkus `if (map)`. Kalau Leaflet lokal gagal load, tombol tidak error.
-
-### `detection/capture.py`
-- Komentar "korosi terlihat 10 detik" → "tubuh/objek SAR terlihat 10 detik"
-  (branch ini murni SAR).
 
 ### `tests/test_harness.py`
 - Hex string rusak (`bytes.fromhex` dengan spasi di tengah angka) diganti

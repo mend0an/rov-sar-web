@@ -5,10 +5,6 @@ detection untuk search-and-rescue). Backend (Python/Django) jalan di laptop
 yang terhubung ke router ROV; UI (HTML/CSS/JS) diakses lewat browser dari
 device manapun di jaringan yang sama.
 
-> **Konfigurasi lokal:** salin `config.example.bat` menjadi `config.bat`, lalu
-> isi path perangkat/model dan token untuk laptop operator. `config.bat`
-> sengaja diabaikan Git agar konfigurasi lokal tidak ikut terunggah.
-
 **Status: paritas dengan `yolo_hop_v10_gps.py`.** Versi ini menutup dua
 blocker dari v.beta3.1: jalur RTSP dipindah dari OpenCV ke PyAV (OpenCV tidak
 bisa mendekode stream ROV Titan T1), dan telemetri ROV lewat TCP 6666 masuk
@@ -18,11 +14,6 @@ Semua lolos test logic/plumbing/integrasi, termasuk uji terhadap ROV tiruan
 yang bicara protokol TCP asli. **Validasi terhadap ROV sungguhan adalah
 langkah lapangan berikutnya** — yang belum pernah diuji di sini adalah stream
 RTSP dan socket telemetri dari perangkat keras yang nyata.
-
-**Ini aplikasi SAR, bukan korosi.** Fitur inspeksi korosi (segmentasi,
-severity, XAI, hull-relative coordinate, audit trail) DITUNDA ke branch
-terpisah sampai dataset korosi tersedia. Jangan menilai versi ini sebagai
-prototipe korosi RIIM.
 
 ---
 
