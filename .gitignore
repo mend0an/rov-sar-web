@@ -1,0 +1,46 @@
+# Local configuration and secrets
+config.bat
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Django/runtime output
+db.sqlite3
+*.sqlite3
+*.log
+media/
+staticfiles/
+
+# Models, datasets, and generated media
+*.pt
+*.pth
+*.onnx
+*.engine
+*.avi
+*.mp4
+*.mkv
+runs/
+datasets/
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
