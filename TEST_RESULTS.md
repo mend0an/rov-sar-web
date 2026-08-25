@@ -324,3 +324,56 @@ Container ini tidak punya `ultralytics` maupun GPU, jadi `device` terbaca
 `n/a` dan waktu inferensi 0. Jalur device-reporting sendiri sudah diuji lewat
 cabang error-nya; **konfirmasi `cuda:0` harus dilakukan di laptop dengan GPU.**
 Itu justru gunanya fitur ini — sekali jalan, jawabannya langsung terbaca di UI.
+
+---
+
+# TEST RESULTS — v.beta8.1c (STOP atomic + failure-aware)
+
+Environment review ini tidak memiliki Django/Channels dan tidak memiliki ROV
+fisik. Karena itu test worker murni dijalankan penuh; test endpoint Django
+ditambahkan tetapi auto-skip di environment ini.
+
+## Regression baru
+
+### `tests/test_beta81c_atomic_stop.py` — **6/6 PASS**
+
+Tanpa Django dan tanpa hardware:
+
+- STOP parsial gagal → state/cache lama tetap dipertahankan ✓
+- STOP sukses → state/cache baru di-commit nol ✓
+- MOVE yang sudah berjalan → STOP menunggu lalu menjadi command terakhir ✓
+- MOVE yang mulai saat STOP aktif → ditolak ✓
+- deadman STOP gagal → state tetap moving dan retry berikutnya dilakukan ✓
+- retry deadman dibatasi interval, tidak busy-loop ✓
+
+Suite yang sama dijalankan terhadap source **v.beta8.1b asli**:
+**4 dari 6 test gagal**, mereproduksi tiga kelas bug yang dipatch.
+
+### `tests/test_beta81_controller.py`
+
+Hasil di environment review: **55 test terdeteksi; 39 PASS + 16 SKIP**.
+Skip disebabkan Django tidak terpasang. Dua endpoint regression baru ikut
+kelompok skip; tiga test frontend failure-reporting berjalan dan PASS:
+
+- E-STOP failure harus mempertahankan `rov_last_move` dan return 409.
+- transisi ke SIM harus batal bila physical STOP gagal.
+- client E-STOP memeriksa HTTP/JSON result.
+- kegagalan SIM di-roll back ke state server.
+- WebSocket `rov_estop` gagal tidak ditampilkan sebagai sukses.
+
+Jalankan ulang suite penuh di environment `yolo_sar` yang memiliki Django
+sebelum trial hardware.
+
+## Static/syntax
+
+- `python -m py_compile` untuk file Python produksi/test yang berubah: PASS.
+- `node --check controls.js`: PASS.
+- `node --check dashboard.js`: PASS.
+- `tests/test_beta81c_atomic_stop.py`: PASS 6/6.
+- GPS / CSS / mapping controller tidak diubah dalam patch ini.
+
+## Batas validasi
+
+Belum ada uji dengan Geneinno Titan T1 nyata. Patch ini memvalidasi logika
+software concurrency/failure handling; respons fisik thruster terhadap STOP
+masih harus diuji terkontrol.

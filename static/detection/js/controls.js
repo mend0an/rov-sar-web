@@ -206,14 +206,22 @@
         zeroSources();
         zeroBudget = 0;
         try {
-            await fetch('/api/rov/estop', {
+            const r = await fetch('/api/rov/estop', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ client_id: CLIENT_ID, reason: reason || '' }),
             });
+            const j = await r.json();
+            if (!r.ok || !j.ok) {
+                status('❌ STOP GAGAL — ' +
+                       (j.error || 'perintah nol tidak terkonfirmasi'));
+                return false;
+            }
             status('🛑 STOP — semua sumbu dinolkan');
+            return true;
         } catch (e) {
             status('❌ STOP gagal terkirim — putuskan daya kalau perlu');
+            return false;
         }
     }
 
@@ -909,8 +917,19 @@
                 body: JSON.stringify({ sim: !!on }),
             });
             const j = await r.json();
+            // Backend mengembalikan state lama saat STOP transisi gagal;
+            // pasang itu kembali ke checkbox agar UI tidak berbohong.
             applySim(j.sim);
-        } catch (e) { status('❌ Gagal mengubah mode simulasi'); }
+            if (!r.ok || !j.ok) {
+                status('❌ Mode simulasi tidak diubah — ' +
+                       (j.error || 'STOP ROV gagal'));
+                return false;
+            }
+            return true;
+        } catch (e) {
+            status('❌ Gagal mengubah mode simulasi');
+            return false;
+        }
     }
 
     function applySim(on) {

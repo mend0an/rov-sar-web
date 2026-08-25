@@ -1043,3 +1043,77 @@ dijalankan di lingkungan telanjang.
 Satu uji lama disesuaikan: `test_leaving_sim_zeroes_movement` sekarang
 mengharapkan **dua** stop, karena masuk simulasi pun menolkan gerak.
 Perubahan ekspektasi ini disengaja dan itulah inti patchnya.
+
+---
+
+## v.beta8.1c — STOP atomic + failure-aware (2026-08-24)
+
+Patch ini **hanya** menyentuh tiga bug keselamatan yang ditemukan saat review
+v.beta8.1b. Tidak ada perubahan GPS, mapping controller, layout UI, protokol,
+kapabilitas tombol, atau perilaku LOCK/E-STOP latching. JS hanya diubah agar
+kegagalan STOP/SIM dari backend tidak salah ditampilkan sebagai sukses.
+
+### FIX 1 — STOP gagal tidak lagi memalsukan state nol
+
+Sebelumnya `RovWorker.force_stop()` selalu mengubah cache dan
+`state.rov_last_move` menjadi `0,0,0` walaupun satu atau lebih kiriman
+`thro:0 / lift:0 / yaw:0` gagal. Akibatnya software bisa terlihat berhenti
+padahal ROV mungkin masih menahan perintah terakhir.
+
+Sekarang:
+
+- ketiga sumbu STOP tetap dicoba;
+- cache + state baru di-commit ke nol **hanya jika ketiganya sukses**;
+- jika salah satu gagal, state gerak sebelumnya dipertahankan secara
+  konservatif;
+- `/api/rov/estop` mengembalikan HTTP 409 jika STOP fisik gagal;
+- transisi REAL↔SIM dibatalkan jika worker ada tetapi STOP fisik gagal,
+  sehingga server tidak berpindah ke SIM sambil meninggalkan wahana nyata
+  mungkin masih bergerak.
+- frontend memeriksa `response.ok` + `json.ok`, dan broadcast
+  `rov_estop` membawa `ok/error`; jadi HTTP 409 tidak lagi tampil sebagai
+  “STOP diterima ROV”.
+
+### FIX 2 — STOP dan MOVE sekarang satu transaksi terhadap soket
+
+Sebelumnya `send_move()` memakai `_move_lock`, tetapi `force_stop()` mengirim
+nol di luar lock. MOVE dapat menyelip di tengah tiga command STOP.
+
+Sekarang:
+
+- MOVE dan STOP memakai `_move_lock` yang sama;
+- state MOVE ditulis selagi lock masih dipegang, sehingga tidak bisa menimpa
+  state nol setelah STOP;
+- `_force_stop_active` dipasang **sebelum** STOP menunggu lock;
+- MOVE baru maupun MOVE yang sedang menunggu lock ditolak selama STOP aktif;
+- `_force_stop_gate` mencegah dua STOP paralel saling menghapus barrier.
+
+Perilaku tetap sengaja **non-latching**: MOVE baru yang benar-benar datang
+setelah transaksi STOP selesai masih mengikuti aturan v.beta8.1b. Patch ini
+hanya menutup race yang overlap dengan STOP.
+
+### FIX 3 — Deadman retry bila STOP gagal
+
+Sebelumnya `_deadman_tripped=True` dipasang sebelum hasil STOP diketahui.
+Kalau kiriman nol gagal, watchdog bisa berhenti mencoba, apalagi state sudah
+terlanjur ditulis nol.
+
+Sekarang:
+
+- `_deadman_tripped` hanya dipasang setelah STOP sukses;
+- STOP gagal mempertahankan state gerak sehingga alasan retry tetap ada;
+- retry dibatasi `DEADMAN_STOP_RETRY_S = 0.5` detik supaya tidak membanjiri
+  soket/log;
+- event `rov_deadman` baru dibroadcast setelah STOP berhasil.
+
+### Scope yang sengaja TIDAK diubah
+
+- LOCK belum diubah menjadi "LOCK + immediate physical STOP".
+- E-STOP belum dibuat latching/auto-lock.
+- GPS tetap persis v.beta8.1b.
+- Layout UI dan controller mapping tetap persis v.beta8.1b; JS hanya
+  menampilkan kegagalan STOP/SIM dengan benar.
+- Tidak ada perubahan format `controller_profiles.json`.
+
+Dua butir pertama tetap dicatat sebagai opsi safety policy untuk trial ROV,
+bukan bagian patch bug v.beta8.1c ini.

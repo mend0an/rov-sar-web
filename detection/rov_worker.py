@@ -60,6 +60,10 @@ MOVE_DEADMAN_S = 1.5
 # tidak, biayanya cuma dua paket per detik.
 MOVE_REPEAT_S = 0.5
 
+# Kalau STOP deadman gagal (mis. WiFi/soket tersendat), jangan menyerah.
+# Retry dibatasi 0.5 s agar tetap responsif tanpa membanjiri soket/log.
+DEADMAN_STOP_RETRY_S = 0.5
+
 # Field yang dikirim ke browser. Sengaja dibatasi: telemetri mentah punya
 # 30+ field (termasuk PWM tiap thruster dan blok DVL) yang tidak ditampilkan
 # panel dan cuma jadi beban WebSocket.
@@ -82,10 +86,16 @@ class RovWorker(threading.Thread):
         self._rov = None
         self._was_fresh = False
         self._last_auto_depth = None
+        # Semua transaksi gerak ke soket harus melewati lock yang sama.
+        # `_force_stop_active` dipasang SEBELUM force_stop menunggu lock,
+        # sehingga MOVE yang datang bersamaan tidak bisa menyelip setelah STOP.
         self._move_lock = threading.Lock()
+        self._force_stop_gate = threading.Lock()
+        self._force_stop_active = threading.Event()
         self._last_move_vec = {"thro": 0, "lift": 0, "yaw": 0}
         self._last_move_sent_at = 0.0
         self._deadman_tripped = False
+        self._last_deadman_stop_attempt = 0.0
 
     def stop(self):
         self._stop_event.set()
@@ -116,17 +126,27 @@ class RovWorker(threading.Thread):
         menahan stick di posisi yang sama itu pemborosan yang tidak membeli
         apa pun. Dedupe di sini, bukan di browser — supaya berlaku sama untuk
         semua sumber masukan.
+
+        Safety: bila force_stop sedang diminta/berjalan, MOVE ditolak. Cek
+        dilakukan sebelum DAN sesudah memperoleh `_move_lock`: yang pertama
+        menolak request baru secepat mungkin, yang kedua menutup race request
+        yang sudah menunggu lock ketika STOP mulai.
         """
         if self._rov is None or not self._rov.is_fresh():
+            return False
+        if self._force_stop_active.is_set():
             return False
 
         now = time.time()
         vec = {"thro": int(thro), "lift": int(lift), "yaw": int(yaw)}
-        force = (now - self._last_move_sent_at) >= MOVE_REPEAT_S
 
         ok = True
         changed = False
         with self._move_lock:
+            if self._force_stop_active.is_set():
+                return False
+
+            force = (now - self._last_move_sent_at) >= MOVE_REPEAT_S
             for axis, value in vec.items():
                 if value != self._last_move_vec[axis] or force:
                     ok &= self._rov.send(axis, value)
@@ -135,22 +155,51 @@ class RovWorker(threading.Thread):
             if changed:
                 self._last_move_sent_at = now
 
-        state.record_move(**vec)
+            # State dan pengiriman soket adalah satu transaksi terhadap STOP.
+            # Kalau ditulis setelah lock dilepas, force_stop bisa menolkan
+            # hardware lalu MOVE lama menimpa state menjadi non-zero lagi.
+            state.record_move(**vec)
+
         return ok
 
     def force_stop(self, reason: str = "") -> bool:
-        """Nolkan semua sumbu tanpa dedupe. Dipakai e-stop dan deadman."""
+        """
+        Nolkan semua sumbu tanpa dedupe. Dipakai e-stop dan deadman.
+
+        STOP adalah transaksi: tiga kiriman nol tidak boleh disisipi MOVE, dan
+        state/cache hanya boleh dinyatakan nol kalau KETIGA kiriman berhasil.
+        Jika satu saja gagal, state lama dipertahankan secara konservatif agar
+        deadman masih melihat kemungkinan wahana bergerak dan dapat mencoba
+        STOP lagi.
+        """
         if self._rov is None:
             return False
-        ok = True
-        for axis in ("thro", "lift", "yaw"):
-            ok &= self._rov.send(axis, 0)
-        with self._move_lock:
-            self._last_move_vec = {"thro": 0, "lift": 0, "yaw": 0}
-            self._last_move_sent_at = time.time()
-        state.record_move(0, 0, 0)
+
+        # Pasang barrier sebelum menunggu lock. MOVE yang datang bersamaan
+        # langsung ditolak; MOVE yang sudah memegang lock akan selesai dulu,
+        # lalu STOP menjadi transaksi terakhir.
+        # Gate kedua mencegah dua STOP paralel saling menghapus barrier:
+        # tanpa ini STOP-A bisa clear Event saat STOP-B masih menunggu lock.
+        with self._force_stop_gate:
+            self._force_stop_active.set()
+            try:
+                with self._move_lock:
+                    ok = True
+                    for axis in ("thro", "lift", "yaw"):
+                        ok &= bool(self._rov.send(axis, 0))
+
+                    if ok:
+                        self._last_move_vec = {"thro": 0, "lift": 0, "yaw": 0}
+                        self._last_move_sent_at = time.time()
+                        state.record_move(0, 0, 0)
+            finally:
+                self._force_stop_active.clear()
+
         if reason:
-            logger.warning(f"🛑 Gerak dinolkan — {reason}")
+            if ok:
+                logger.warning(f"🛑 Gerak dinolkan — {reason}")
+            else:
+                logger.error(f"❌ STOP GAGAL — state gerak dipertahankan — {reason}")
         return ok
 
     # ─── Main loop ─────────────────────────────────────────────────────
@@ -236,18 +285,31 @@ class RovWorker(threading.Thread):
 
         if not moving:
             self._deadman_tripped = False
+            self._last_deadman_stop_attempt = 0.0
             return
         if age is None or age < MOVE_DEADMAN_S:
             self._deadman_tripped = False
+            self._last_deadman_stop_attempt = 0.0
             return
         if self._deadman_tripped:
             return
 
-        self._deadman_tripped = True
-        self.force_stop(
+        now = time.time()
+        if (self._last_deadman_stop_attempt and
+                now - self._last_deadman_stop_attempt < DEADMAN_STOP_RETRY_S):
+            return
+        self._last_deadman_stop_attempt = now
+
+        ok = self.force_stop(
             f"tidak ada perintah gerak selama {age:.1f}s "
             f"(vektor terakhir {vec}) — klien kemungkinan terputus"
         )
+        if not ok:
+            # Jangan set tripped dan jangan nolkan state: watchdog harus tetap
+            # punya alasan untuk mencoba lagi setelah interval retry.
+            return
+
+        self._deadman_tripped = True
         broadcast("rov_deadman", {"vector": vec, "age_s": round(age, 2)})
 
     def _apply_auto_depth(self):

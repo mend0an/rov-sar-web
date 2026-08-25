@@ -278,7 +278,12 @@ function handleTelemetryEvent(data) {
                   `(thro:${v.thro} lift:${v.lift} yaw:${v.yaw}, ` +
                   `diam ${data.payload.age_s}s)`);
     } else if (data.event === 'rov_estop') {
-        setStatus('🛑 STOP diterima ROV');
+        if (data.payload.ok) {
+            setStatus('🛑 STOP diterima ROV');
+        } else {
+            setStatus('❌ STOP GAGAL — ' +
+                      (data.payload.error || 'perintah nol tidak terkonfirmasi'));
+        }
     } else if (data.event === 'rov_prefs') {
         const el1 = $('ctrl-rov-heading');
         const el2 = $('ctrl-rov-auto-depth');

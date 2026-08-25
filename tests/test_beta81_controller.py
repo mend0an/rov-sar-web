@@ -471,8 +471,9 @@ except Exception:
 
 
 class _FakeWorker:
-    def __init__(self):
+    def __init__(self, stop_ok=True):
         self.moves, self.stops, self.commands = [], [], []
+        self.stop_ok = stop_ok
 
     def send(self, key, value):
         self.commands.append((key, value))
@@ -484,7 +485,7 @@ class _FakeWorker:
 
     def force_stop(self, reason=""):
         self.stops.append(reason)
-        return True
+        return self.stop_ok
 
 
 @unittest.skipUnless(_DJANGO, "Django tidak terpasang — uji dilewati")
@@ -585,6 +586,59 @@ class TestSimTransitionSafety(SafetyBase):
         n = len(self.worker.stops)
         self.sim(True)
         self.assertEqual(len(self.worker.stops), n)
+
+
+class TestStopFailureEndpoint(SafetyBase):
+    """
+    v.beta8.1c: endpoint tidak boleh menulis state nol atau berganti mode
+    jika force_stop perangkat keras mengembalikan gagal.
+    """
+
+    def test_estop_failure_preserves_move_state(self):
+        self.worker.stop_ok = False
+        state.record_move(2, 0, 0)
+        r = self.estop()
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(state.rov_last_move,
+                         {"thro": 2, "lift": 0, "yaw": 0})
+
+    def test_sim_transition_aborts_when_physical_stop_fails(self):
+        self.worker.stop_ok = False
+        state.record_move(2, 0, 0)
+        r = self.sim(True)
+        self.assertEqual(r.status_code, 409)
+        self.assertFalse(state.rov_sim_mode)
+        self.assertEqual(state.rov_last_move,
+                         {"thro": 2, "lift": 0, "yaw": 0})
+
+
+
+class TestStopFailureUI(unittest.TestCase):
+    """Frontend tidak boleh menampilkan STOP sukses untuk HTTP 409."""
+
+    def setUp(self):
+        self.src = JS_CONTROLS.read_text(encoding="utf-8")
+
+    def test_estop_checks_http_and_json_result(self):
+        body = _slice_function(self.src, "estop")
+        self.assertIn("r.ok", body)
+        self.assertIn("j.ok", body)
+        self.assertIn("STOP GAGAL", body)
+
+    def test_sim_failure_rolls_back_and_reports_error(self):
+        body = _slice_function(self.src, "setSim")
+        self.assertIn("applySim(j.sim)", body)
+        self.assertIn("r.ok", body)
+        self.assertIn("j.ok", body)
+        self.assertIn("tidak diubah", body)
+
+    def test_websocket_estop_failure_is_not_reported_as_success(self):
+        src = JS_DASHBOARD.read_text(encoding="utf-8")
+        pos = src.index("data.event === 'rov_estop'")
+        body = src[pos:pos + 500]
+        self.assertIn("data.payload.ok", body)
+        self.assertIn("STOP GAGAL", body)
+
 
 
 class TestEstopIsNeverSimulated(SafetyBase):

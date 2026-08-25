@@ -489,7 +489,9 @@ def api_rov_estop(request):
     sim = state.rov_sim_mode
     worker = state.rov_worker
 
-    state.record_move(0, 0, 0)
+    # Klaim pilot selalu dilepas: E-STOP adalah interupsi keselamatan.
+    # Vektor state TIDAK dinolkan lebih dulu; kalau STOP fisik gagal, state
+    # lama harus tetap terlihat supaya deadman masih punya alasan retry.
     with state._rov_lock:
         state.rov_pilot_id = None
         state.rov_pilot_at = 0.0
@@ -498,15 +500,28 @@ def api_rov_estop(request):
         # Tanpa worker tidak ada perangkat keras untuk dihentikan. Di
         # simulasi itu keadaan normal; di mode nyata itu kegagalan yang
         # harus terlihat.
-        broadcast("rov_estop", {"ok": sim, "sim": sim})
+        if sim:
+            state.record_move(0, 0, 0)
+        err = None if sim else "Telemetri ROV tidak aktif"
+        broadcast("rov_estop", {"ok": sim, "sim": sim, "error": err})
         if sim:
             return JsonResponse({"ok": True, "sim": True})
         return JsonResponse(
-            {"ok": False, "error": "Telemetri ROV tidak aktif"}, status=409)
+            {"ok": False, "error": err}, status=409)
 
     ok = worker.force_stop(f"e-stop dari klien {data.get('client_id', '?')}")
-    broadcast("rov_estop", {"ok": bool(ok), "sim": sim})
-    return JsonResponse({"ok": bool(ok), "sim": sim})
+    if ok:
+        # RovWorker asli sudah mencatat nol secara atomic; baris ini menjaga
+        # kompatibilitas worker tiruan/test yang hanya mengembalikan status.
+        state.record_move(0, 0, 0)
+    err = None if ok else "STOP gagal dikirim ke semua sumbu ROV"
+    broadcast("rov_estop", {"ok": bool(ok), "sim": sim, "error": err})
+    if not ok:
+        return JsonResponse(
+            {"ok": False, "sim": sim, "error": err},
+            status=409,
+        )
+    return JsonResponse({"ok": True, "sim": sim})
 
 
 @csrf_exempt
@@ -550,8 +565,18 @@ def api_rov_sim(request):
     if was != sim:
         worker = state.rov_worker
         if worker is not None:
-            worker.force_stop("berpindah mode simulasi" if sim
-                              else "keluar dari mode simulasi")
+            ok = worker.force_stop("berpindah mode simulasi" if sim
+                                   else "keluar dari mode simulasi")
+            if not ok:
+                # Jangan berganti mode dan jangan mengaku state sudah nol.
+                # Khusus REAL→SIM ini penting: kalau STOP gagal tetapi flag
+                # SIM tetap dipasang, server justru memutus jalur perintah ke
+                # wahana yang mungkin masih menahan gerak terakhir.
+                return JsonResponse(
+                    {"ok": False, "sim": was,
+                     "error": "Gagal menolkan gerak ROV; mode tidak diubah"},
+                    status=409,
+                )
         state.record_move(0, 0, 0)
         # Klaim kendali ikut dilepas: mode berganti berarti aturan mainnya
         # berganti, dan pilot yang sedang memegang stick tidak boleh
